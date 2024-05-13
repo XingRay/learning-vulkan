@@ -7,31 +7,40 @@
 #include <cstdint>
 #include <GLFW/glfw3.h>
 #include "vulkan/vulkan.hpp"
+#include "QueueFamilyIndices.h"
 
 class TriangleTest {
 public:
     // public fields
 private:
     // private fields
-    const int32_t WIDTH = 800;
-    const int32_t HEIGHT = 600;
+    const int32_t mWidth = 800;
+    const int32_t mHeight = 600;
 
-    const std::vector<const char*> validationLayers = {
+    const std::vector<const char*> mValidationLayers = {
             "VK_LAYER_KHRONOS_validation"
     };
 
 #ifdef NDEBUG
-    const bool enableValidationLayer = false;
+    const bool mEnableValidationLayer = false;
 #else
-    const bool enableValidationLayer = true;
+    const bool mEnableValidationLayer = true;
 #endif
 
-    GLFWwindow* window;
+    GLFWwindow* mWindow;
 
-    vk::Instance instance;
+    vk::Instance mInstance;
 
-    VkDebugUtilsMessengerEXT debugMessenger;
+    vk::DebugUtilsMessengerEXT mDebugMessenger;
 
+    // 物理设备
+    vk::PhysicalDevice mPhysicalDevice;
+
+    // 逻辑设备
+    vk::Device mDevice;
+
+    // 图形相关的任务队列
+    vk::Queue mGraphicQueue;
 
 public:
     TriangleTest();
@@ -56,16 +65,25 @@ private:
 
     void setupDebugMessenger();
 
-//    VkResult createDebugUtilsMessengerEXT(VkInstance instance,
-//                                          const VkDebugUtilsMessengerCreateInfoEXT *createInfo,
-//                                          const VkAllocationCallbacks *allocator,
-//                                          VkDebugUtilsMessengerEXT *callback);
+    void destroyDebugUtilsMessengerExt(const vk::AllocationCallbacks *pAllocator);
 
-    void destroyDebugUtilsMessengerExt(const VkAllocationCallbacks *pAllocator);
+    void pickPhysicalDevice();
+
+    bool isDeviceSuitable(vk::PhysicalDevice device);
+
+    int rateDeviceSuitability(vk::PhysicalDevice device);
+
+    void createLogicDevice();
+
+    QueueFamilyIndices findQueueFamilies(vk::PhysicalDevice& device);
 };
 
 
-VkResult CreateDebugUtilsMessengerEXT(VkInstance instance, const VkDebugUtilsMessengerCreateInfoEXT *pCreateInfo, const VkAllocationCallbacks *pAllocator, VkDebugUtilsMessengerEXT *pDebugMessenger);
-void DestroyDebugUtilsMessengerEXT(VkInstance instance, VkDebugUtilsMessengerEXT debugMessenger, const VkAllocationCallbacks* pAllocator);
+vk::Result CreateDebugUtilsMessengerEXT(vk::Instance instance,
+                                        const vk::DebugUtilsMessengerCreateInfoEXT *pCreateInfo,
+                                        const vk::AllocationCallbacks *pAllocator,
+                                        vk::DebugUtilsMessengerEXT *pDebugMessenger);
 
-void populateDebugMessengerCreateInfo(VkDebugUtilsMessengerCreateInfoEXT& createInfo);
+void DestroyDebugUtilsMessengerEXT(vk::Instance instance, vk::DebugUtilsMessengerEXT debugMessenger, const vk::AllocationCallbacks *pAllocator);
+
+void populateDebugMessengerCreateInfo(vk::DebugUtilsMessengerCreateInfoEXT &createInfo);

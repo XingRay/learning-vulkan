@@ -19,7 +19,7 @@ int main() {
 //    glfwInit();
 //
 //    glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
-//    GLFWwindow *window = glfwCreateWindow(800, 600, "Vulkan window", nullptr, nullptr);
+//    GLFWwindow *mWindow = glfwCreateWindow(800, 600, "Vulkan mWindow", nullptr, nullptr);
 //
 //    uint32_t extensionCount = 0;
 //    vkEnumerateInstanceExtensionProperties(nullptr, &extensionCount, nullptr);
@@ -31,11 +31,11 @@ int main() {
 //    auto test = matrix * vec;
 //    printf("test: %f", test[0]);
 //
-//    while (!glfwWindowShouldClose(window)) {
+//    while (!glfwWindowShouldClose(mWindow)) {
 //        glfwPollEvents();
 //    }
 //
-//    glfwDestroyWindow(window);
+//    glfwDestroyWindow(mWindow);
 //
 //    glfwTerminate();
 
