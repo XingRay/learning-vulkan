@@ -11,7 +11,8 @@
 class QueueFamilyIndices {
 
 public:
-    std::optional<uint32_t> queueFamily;
+    std::optional<uint32_t> graphicQueueFamily;
+    std::optional<uint32_t> presentQueueFamily;
 
 public:
     bool isComplete();

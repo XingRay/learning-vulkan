@@ -5,9 +5,19 @@
 #pragma once
 
 #include <cstdint>
+#include <limits>
+#include <algorithm>
+
+// That way GLFW will include its own definitions and automatically load the Vulkan header with it.
+#define GLFW_INCLUDE_VULKAN
+
 #include <GLFW/glfw3.h>
+
 #include "vulkan/vulkan.hpp"
 #include "QueueFamilyIndices.h"
+#include "SwapChainSupportDetail.h"
+
+
 
 class TriangleTest {
 public:
@@ -17,8 +27,12 @@ private:
     const int32_t mWidth = 800;
     const int32_t mHeight = 600;
 
-    const std::vector<const char*> mValidationLayers = {
+    const std::vector<const char *> mValidationLayers = {
             "VK_LAYER_KHRONOS_validation"
+    };
+
+    const std::vector<const char *> mRequiredExtensions = {
+            VK_KHR_SWAPCHAIN_EXTENSION_NAME
     };
 
 #ifdef NDEBUG
@@ -27,7 +41,7 @@ private:
     const bool mEnableValidationLayer = true;
 #endif
 
-    GLFWwindow* mWindow;
+    GLFWwindow *mWindow;
 
     vk::Instance mInstance;
 
@@ -42,9 +56,18 @@ private:
     // 图形相关的任务队列
     vk::Queue mGraphicQueue;
 
+    // 显示相关的任务队列
+    vk::Queue mPresentQueue;
+
+    vk::SurfaceKHR mSurface;
+
+    vk::SwapchainKHR mSwapChain;
+
 public:
     TriangleTest();
+
     ~TriangleTest();
+
     void run();
 
 private:
@@ -61,7 +84,7 @@ private:
 
     bool checkValidationLayerSupported();
 
-    std::vector<const char*> getRequiredExtensions();
+    std::vector<const char *> getRequiredExtensions();
 
     void setupDebugMessenger();
 
@@ -75,7 +98,21 @@ private:
 
     void createLogicDevice();
 
-    QueueFamilyIndices findQueueFamilies(vk::PhysicalDevice& device);
+    QueueFamilyIndices findQueueFamilies(vk::PhysicalDevice &device);
+
+    void createSurface();
+
+    bool isDeviceSupportedRequiredExtensions(vk::PhysicalDevice device);
+
+    SwapChainSupportDetail querySwapChainSupported(vk::PhysicalDevice& device);
+
+    vk::SurfaceFormatKHR chooseSwapSurfaceFormat(const std::vector<vk::SurfaceFormatKHR>& availableFormats);
+
+    vk::PresentModeKHR choosePresentMode(const std::vector<vk::PresentModeKHR>& availablePresentModes);
+
+    vk::Extent2D chooseSwapExtent(const vk::SurfaceCapabilitiesKHR& capability);
+
+    void createSwapChain();
 };
 
 

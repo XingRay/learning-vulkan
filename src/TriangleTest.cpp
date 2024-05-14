@@ -5,12 +5,11 @@
 #include "TriangleTest.h"
 #include "vulkan/vulkan.hpp"
 
-// That way GLFW will include its own definitions and automatically load the Vulkan header with it.
-#define GLFW_INCLUDE_VULKAN
-
-#include <GLFW/glfw3.h>
 #include <iostream>
 #include <map>
+#include <set>
+#include <string>
+
 #include "QueueFamilyIndices.h"
 
 
@@ -23,6 +22,13 @@ TriangleTest::~TriangleTest() {
 }
 
 void TriangleTest::run() {
+
+#if defined(VK_VERSION_1_0)
+    std::cout << "VK_VERSION_1_0 defined" << std::endl;
+#elif
+    std::cout<<"VK_VERSION_1_0 not defined"<<std::endl;
+#endif
+
     initWindow();
     initVulkan();
     mainLoop();
@@ -47,8 +53,10 @@ void TriangleTest::initWindow() {
 void TriangleTest::initVulkan() {
     createInstance();
     setupDebugMessenger();
+    createSurface();
     pickPhysicalDevice();
     createLogicDevice();
+    createSwapChain();
 }
 
 void TriangleTest::mainLoop() {
@@ -62,15 +70,19 @@ void TriangleTest::cleanUp() {
         destroyDebugUtilsMessengerExt(nullptr);
     }
 
+    mDevice.destroy(mSwapChain);
     mDevice.destroy();
 
-    mInstance.destroy(nullptr);
+    mInstance.destroy(mSurface);
+    mInstance.destroy();
 
     glfwDestroyWindow(mWindow);
     glfwTerminate();
 }
 
 void TriangleTest::createInstance() {
+    std::cout << "createInstance\n";
+
     vk::ApplicationInfo appInfo;
     appInfo.sType = vk::StructureType::eApplicationInfo;
     appInfo.setPApplicationName("triangle test");
@@ -86,7 +98,7 @@ void TriangleTest::createInstance() {
     std::vector<const char *> extensions = getRequiredExtensions();
     createInfo.enabledExtensionCount = extensions.size();
     createInfo.setPpEnabledExtensionNames(extensions.data());
-    std::cout << "glfw required extensions \n";
+    std::cout << "extensions \n";
     for (auto &extension: extensions) {
         std::cout << '\t' << extension << std::endl;
     }
@@ -124,10 +136,10 @@ void TriangleTest::createInstance() {
         throw std::runtime_error("failed to get extensions");
     }
 
-    std::cout << "available extensions \n";
-    for (const auto &extension: allExtensions) {
-        std::cout << '\t' << extension.extensionName << '\n';
-    }
+//    std::cout << "available extensions \n";
+//    for (const auto &extension: allExtensions) {
+//        std::cout << '\t' << extension.extensionName << '\n';
+//    }
 }
 
 bool TriangleTest::checkValidationLayerSupported() {
@@ -167,9 +179,12 @@ bool TriangleTest::checkValidationLayerSupported() {
 
 std::vector<const char *> TriangleTest::getRequiredExtensions() {
     uint32_t glfwRequiredExtensionCount = 0;
-    // 查询 glfw 需要的扩展
+    // 查询 glfw 需要的 vulkan 扩展
     const char **glfwRequiredExtensions = glfwGetRequiredInstanceExtensions(&glfwRequiredExtensionCount);
-
+    std::cout << "glfwRequiredExtensions:" << std::endl;
+    for (int i = 0; i < glfwRequiredExtensionCount; i++) {
+        std::cout << '\t' << glfwRequiredExtensions[i] << std::endl;
+    }
     std::vector<const char *> extensions(glfwRequiredExtensions, glfwRequiredExtensions + glfwRequiredExtensionCount);
     if (mEnableValidationLayer) {
         extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
@@ -194,6 +209,7 @@ void TriangleTest::destroyDebugUtilsMessengerExt(const vk::AllocationCallbacks *
 }
 
 void TriangleTest::setupDebugMessenger() {
+    std::cout << "setupDebugMessenger\n";
     if (!mEnableValidationLayer) {
         return;
     }
@@ -207,6 +223,7 @@ void TriangleTest::setupDebugMessenger() {
 }
 
 void TriangleTest::pickPhysicalDevice() {
+    std::cout << "pickPhysicalDevice\n";
     auto devices = mInstance.enumeratePhysicalDevices();
     for (const auto &device: devices) {
         vk::PhysicalDeviceProperties properties = device.getProperties();
@@ -220,7 +237,9 @@ void TriangleTest::pickPhysicalDevice() {
             break;
         }
     }
+
     if (mPhysicalDevice == VK_NULL_HANDLE) {
+        std::cout << "mPhysicalDevice not found" << std::endl;
         throw std::runtime_error("failed to find GPUs with vulkan support !");
     }
 
@@ -236,23 +255,33 @@ void TriangleTest::pickPhysicalDevice() {
 //        throw std::runtime_error("failed to find a suitable GPU!");
 //    }
 
-    auto extensionProperties = mPhysicalDevice.enumerateDeviceExtensionProperties();
-    for (const auto &extensionProperty: extensionProperties) {
-        std::cout << "\textensionName: " << extensionProperty.extensionName << "\tspecVersion: " << extensionProperty.specVersion << std::endl;
-    }
+//    auto extensionProperties = mPhysicalDevice.enumerateDeviceExtensionProperties();
+//    for (const auto &extensionProperty: extensionProperties) {
+//        std::cout << "\textensionName: " << extensionProperty.extensionName << "\tspecVersion: " << extensionProperty.specVersion << std::endl;
+//    }
 }
 
 bool TriangleTest::isDeviceSuitable(vk::PhysicalDevice device) {
-//    vkGetPhysicalDeviceProperties(device, &deviceProperties);
-//    vkGetPhysicalDeviceFeatures(device, &deviceFeatures);
     vk::PhysicalDeviceProperties deviceProperties = device.getProperties();
     vk::PhysicalDeviceFeatures deviceFeatures = device.getFeatures();
 
     QueueFamilyIndices indices = findQueueFamilies(device);
     if (!indices.isComplete()) {
+        std::cout << "device QueueFamilyIndices is not complete !" << std::endl;
         return false;
     }
-    std::cout << "deviceType: " << to_string(deviceProperties.deviceType) << std::endl;
+
+    if (!isDeviceSupportedRequiredExtensions(device)) {
+        std::cout << "isDeviceSupportedRequiredExtensions: false" << std::endl;
+        return false;
+    }
+
+    // 验证扩展可用后才尝试查询交换链支持
+    SwapChainSupportDetail swapChainSupportedDetail = querySwapChainSupported(device);
+    if (swapChainSupportedDetail.formats.empty() || swapChainSupportedDetail.presentModes.empty()) {
+        std::cout << "swapChainSupportedDetail: formats or presentModes is empty" << std::endl;
+        return false;
+    }
 
 //     核显
 //    vk::PhysicalDeviceType::eIntegratedGpu;
@@ -285,26 +314,48 @@ int TriangleTest::rateDeviceSuitability(vk::PhysicalDevice device) {
 }
 
 void TriangleTest::createLogicDevice() {
+    std::cout << "createLogicDevice\n";
     QueueFamilyIndices indices = findQueueFamilies(mPhysicalDevice);
-    uint32_t queueFamilyIndex = indices.queueFamily.value();
+    if (!indices.isComplete()) {
+        std::cout << "findQueueFamilies failed, indices is not complete" << std::endl;
+        throw std::runtime_error("findQueueFamilies failed");
+    }
+    uint32_t graphicFamilyIndex = indices.graphicQueueFamily.value();
+    uint32_t presentFamilyIndex = indices.graphicQueueFamily.value();
 
-    vk::DeviceQueueCreateInfo queueCreateInfo;
-    queueCreateInfo.sType = vk::StructureType::eDeviceQueueCreateInfo;
-    queueCreateInfo.queueFamilyIndex = queueFamilyIndex;
-    queueCreateInfo.queueCount = 1;
-
+    std::vector<vk::DeviceQueueCreateInfo> queueCreateInfos;
     float queuePriority = 1.0f;
-    queueCreateInfo.pQueuePriorities = &queuePriority;
+    if (graphicFamilyIndex == presentFamilyIndex) {
+        vk::DeviceQueueCreateInfo queueCreateInfo;
+        queueCreateInfo.sType = vk::StructureType::eDeviceQueueCreateInfo;
+        queueCreateInfo.queueFamilyIndex = graphicFamilyIndex;
+        queueCreateInfo.queueCount = 1;
+        queueCreateInfo.pQueuePriorities = &queuePriority;
+
+        queueCreateInfos.push_back(queueCreateInfo);
+    } else {
+        std::array<uint32_t, 2> queueFamilyIndices = {graphicFamilyIndex, presentFamilyIndex};
+        for (uint32_t queueFamilyIndex: queueFamilyIndices) {
+            vk::DeviceQueueCreateInfo queueCreateInfo;
+            queueCreateInfo.sType = vk::StructureType::eDeviceQueueCreateInfo;
+            queueCreateInfo.queueFamilyIndex = queueFamilyIndex;
+            queueCreateInfo.queueCount = 1;
+            queueCreateInfo.pQueuePriorities = &queuePriority;
+            queueCreateInfos.push_back(queueCreateInfo);
+        }
+    }
+
 
     vk::PhysicalDeviceFeatures deviceFeatures{};
 
     vk::DeviceCreateInfo deviceCreateInfo;
     deviceCreateInfo.sType = vk::StructureType::eDeviceCreateInfo;
-    deviceCreateInfo.setPQueueCreateInfos(&queueCreateInfo);
-    deviceCreateInfo.setQueueCreateInfoCount(1);
-    deviceCreateInfo.pEnabledFeatures = &deviceFeatures;
+    deviceCreateInfo.setPQueueCreateInfos(queueCreateInfos.data());
+    deviceCreateInfo.setQueueCreateInfoCount(queueCreateInfos.size());
+    deviceCreateInfo.setPEnabledFeatures(&deviceFeatures);
+    deviceCreateInfo.setEnabledExtensionCount(mRequiredExtensions.size());
+    deviceCreateInfo.setPpEnabledExtensionNames(mRequiredExtensions.data());
 
-    deviceCreateInfo.enabledExtensionCount = 0;
     if (mEnableValidationLayer) {
         deviceCreateInfo.enabledLayerCount = mValidationLayers.size();
         deviceCreateInfo.setPpEnabledLayerNames(mValidationLayers.data());
@@ -315,25 +366,145 @@ void TriangleTest::createLogicDevice() {
     // 创建逻辑设备的同时会根据 deviceCreateInfo.pQueueCreateInfo 创建任务队列
     mDevice = mPhysicalDevice.createDevice(deviceCreateInfo);
     // 从逻辑设备中取出任务队列, 第二个参数为下标, 总共创建了一个队列,所以这里下标为 0
-    mGraphicQueue = mDevice.getQueue(queueFamilyIndex, 0);
+    mGraphicQueue = mDevice.getQueue(graphicFamilyIndex, 0);
+    mPresentQueue = mDevice.getQueue(presentFamilyIndex, 0);
 }
 
 QueueFamilyIndices TriangleTest::findQueueFamilies(vk::PhysicalDevice &device) {
     QueueFamilyIndices indices;
     auto queueFamilyProperties = device.getQueueFamilyProperties();
 
-    int i = 0;
-    for (const auto &queueFamilyProperty: queueFamilyProperties) {
-        if (queueFamilyProperty.queueFlags & vk::QueueFlagBits::eGraphics) {
-            indices.queueFamily = i;
+
+    for (int i = 0; i < queueFamilyProperties.size(); i++) {
+        const auto &queueFamilyProperty = queueFamilyProperties[i];
+        const vk::QueueFlags &queueFlags = queueFamilyProperty.queueFlags;
+
+        if (queueFlags & vk::QueueFlagBits::eGraphics) {
+            std::cout << "graphicQueueFamily found: " << i << std::endl;
+            indices.graphicQueueFamily = i;
         }
+
+        if (device.getSurfaceSupportKHR(i, mSurface)) {
+            std::cout << "presentQueueFamily found: " << i << std::endl;
+            indices.presentQueueFamily = i;
+        }
+
         if (indices.isComplete()) {
             break;
         }
-        i++;
     }
 
     return indices;
+}
+
+void TriangleTest::createSurface() {
+    std::cout << "createSurface\n";
+    VkResult result = glfwCreateWindowSurface((VkInstance) mInstance, mWindow, nullptr, (VkSurfaceKHR *) &mSurface);
+    if (result != VK_SUCCESS) {
+        throw std::runtime_error("failed to create window surface!");
+    }
+    std::cout << "glfwCreateWindowSurface success !" << std::endl;
+}
+
+bool TriangleTest::isDeviceSupportedRequiredExtensions(vk::PhysicalDevice device) {
+    auto properties = device.enumerateDeviceExtensionProperties();
+    std::set<std::string> requiredExtensions(mRequiredExtensions.begin(), mRequiredExtensions.end());
+    for (const auto &property: properties) {
+        requiredExtensions.erase(property.extensionName);
+    }
+    return requiredExtensions.empty();
+}
+
+SwapChainSupportDetail TriangleTest::querySwapChainSupported(vk::PhysicalDevice &device) {
+    SwapChainSupportDetail detail;
+
+    detail.capabilities = device.getSurfaceCapabilitiesKHR(mSurface);
+    detail.formats = device.getSurfaceFormatsKHR(mSurface);
+    detail.presentModes = device.getSurfacePresentModesKHR(mSurface);
+
+    return detail;
+}
+
+vk::SurfaceFormatKHR TriangleTest::chooseSwapSurfaceFormat(const std::vector<vk::SurfaceFormatKHR> &availableFormats) {
+    for (const auto &availableFormat: availableFormats) {
+        if (availableFormat.format == vk::Format::eR8G8B8A8Srgb && availableFormat.colorSpace == vk::ColorSpaceKHR::eSrgbNonlinear) {
+            return availableFormat;
+        }
+    }
+
+    return availableFormats[0];
+}
+
+vk::PresentModeKHR TriangleTest::choosePresentMode(const std::vector<vk::PresentModeKHR> &availablePresentModes) {
+    for (const auto &availablePresentMode: availablePresentModes) {
+        if (availablePresentMode == vk::PresentModeKHR::eMailbox) {
+            return availablePresentMode;
+        }
+    }
+    return vk::PresentModeKHR::eFifo;
+}
+
+vk::Extent2D TriangleTest::chooseSwapExtent(const vk::SurfaceCapabilitiesKHR &capability) {
+    if (capability.currentExtent.width != std::numeric_limits<uint32_t>::max()) {
+        return capability.currentExtent;
+    }
+
+    int width;
+    int height;
+
+    glfwGetFramebufferSize(mWindow, &width, &height);
+    return vk::Extent2D{
+            std::clamp((uint32_t) width, capability.minImageExtent.width, capability.maxImageExtent.width),
+            std::clamp((uint32_t) height, capability.minImageExtent.height, capability.maxImageExtent.height),
+    };
+}
+
+void TriangleTest::createSwapChain() {
+    SwapChainSupportDetail supportDetail = querySwapChainSupported(mPhysicalDevice);
+    vk::SurfaceCapabilitiesKHR capabilities = supportDetail.capabilities;
+
+    vk::SurfaceFormatKHR format = chooseSwapSurfaceFormat(supportDetail.formats);
+    vk::PresentModeKHR presentMode = choosePresentMode(supportDetail.presentModes);
+    vk::Extent2D extent2D = chooseSwapExtent(capabilities);
+
+    uint32_t imageCount = capabilities.minImageCount + 1;
+    // capabilities.maxImageCount == 0 表示不做限制
+    if (capabilities.maxImageCount > 0 && imageCount > capabilities.maxImageCount) {
+        imageCount = capabilities.maxImageCount;
+    }
+
+    vk::SwapchainCreateInfoKHR createInfo;
+    createInfo.sType = vk::StructureType::eSwapchainCreateInfoKHR;
+    createInfo.surface = mSurface;
+    createInfo.minImageCount = imageCount;
+    createInfo.imageFormat = format.format;
+    createInfo.imageColorSpace = format.colorSpace;
+    createInfo.imageExtent = extent2D;
+    createInfo.imageArrayLayers = 1;
+    createInfo.imageUsage = vk::ImageUsageFlagBits::eColorAttachment;
+
+    QueueFamilyIndices queueFamilyIndices = findQueueFamilies(mPhysicalDevice);
+    if(queueFamilyIndices.graphicQueueFamily== queueFamilyIndices.presentQueueFamily){
+        // 共用一个队列, 图片可以被队列独占, 这样效率最高
+        createInfo.imageSharingMode = vk::SharingMode::eExclusive;
+        createInfo.queueFamilyIndexCount = 0;
+        createInfo.setQueueFamilyIndices(nullptr);
+    } else{
+        // 2个队列
+        createInfo.imageSharingMode = vk::SharingMode::eConcurrent;
+        createInfo.queueFamilyIndexCount = 2;
+        uint32_t indices[]{queueFamilyIndices.graphicQueueFamily.value(), queueFamilyIndices.presentQueueFamily.value()};
+        createInfo.setQueueFamilyIndices(indices);
+    }
+
+    createInfo.preTransform = capabilities.currentTransform;
+    createInfo.compositeAlpha = vk::CompositeAlphaFlagBitsKHR::eOpaque;
+    createInfo.presentMode = presentMode;
+    createInfo.clipped = vk::True;
+    createInfo.oldSwapchain = VK_NULL_HANDLE;
+
+    mSwapChain = mDevice.createSwapchainKHR(createInfo);
+
 }
 
 vk::Result CreateDebugUtilsMessengerEXT(vk::Instance instance,
@@ -363,9 +534,10 @@ void DestroyDebugUtilsMessengerEXT(vk::Instance instance, vk::DebugUtilsMessenge
 
 void populateDebugMessengerCreateInfo(vk::DebugUtilsMessengerCreateInfoEXT &createInfo) {
     createInfo.sType = vk::StructureType::eDebugUtilsMessengerCreateInfoEXT;
-    createInfo.messageSeverity = vk::DebugUtilsMessageSeverityFlagBitsEXT::eInfo
+    createInfo.messageSeverity = vk::DebugUtilsMessageSeverityFlagBitsEXT::eError
                                  | vk::DebugUtilsMessageSeverityFlagBitsEXT::eWarning
-                                 | vk::DebugUtilsMessageSeverityFlagBitsEXT::eError;
+                                 | vk::DebugUtilsMessageSeverityFlagBitsEXT::eInfo;
+
     createInfo.messageType = vk::DebugUtilsMessageTypeFlagBitsEXT::eGeneral
                              | vk::DebugUtilsMessageTypeFlagBitsEXT::eValidation
                              | vk::DebugUtilsMessageTypeFlagBitsEXT::ePerformance

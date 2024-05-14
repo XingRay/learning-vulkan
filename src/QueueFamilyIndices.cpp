@@ -5,5 +5,5 @@
 #include "QueueFamilyIndices.h"
 
 bool QueueFamilyIndices::isComplete() {
-    return queueFamily.has_value();
+    return graphicQueueFamily.has_value() && presentQueueFamily.has_value();
 }
