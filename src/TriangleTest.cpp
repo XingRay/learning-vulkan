@@ -11,6 +11,7 @@
 #include <string>
 
 #include "QueueFamilyIndices.h"
+#include "FileUtil.h"
 
 
 TriangleTest::TriangleTest() {
@@ -57,6 +58,10 @@ void TriangleTest::initVulkan() {
     pickPhysicalDevice();
     createLogicDevice();
     createSwapChain();
+    createImageViews();
+    createRenderPass();
+    createGraphicPipeline();
+    createFrameBuffer();
 }
 
 void TriangleTest::mainLoop() {
@@ -70,6 +75,11 @@ void TriangleTest::cleanUp() {
         destroyDebugUtilsMessengerExt(nullptr);
     }
 
+    cleanFrameBuffers();
+    mDevice.destroy(mPipeline);
+    mDevice.destroy(mPipelineLayout);
+    mDevice.destroy(mRenderPass);
+    cleanImageViews();
     mDevice.destroy(mSwapChain);
     mDevice.destroy();
 
@@ -463,9 +473,9 @@ void TriangleTest::createSwapChain() {
     SwapChainSupportDetail supportDetail = querySwapChainSupported(mPhysicalDevice);
     vk::SurfaceCapabilitiesKHR capabilities = supportDetail.capabilities;
 
-    vk::SurfaceFormatKHR format = chooseSwapSurfaceFormat(supportDetail.formats);
+    mSwapChainImageFormat = chooseSwapSurfaceFormat(supportDetail.formats);
     vk::PresentModeKHR presentMode = choosePresentMode(supportDetail.presentModes);
-    vk::Extent2D extent2D = chooseSwapExtent(capabilities);
+    mSwapChainExtent = chooseSwapExtent(capabilities);
 
     uint32_t imageCount = capabilities.minImageCount + 1;
     // capabilities.maxImageCount == 0 表示不做限制
@@ -477,19 +487,19 @@ void TriangleTest::createSwapChain() {
     createInfo.sType = vk::StructureType::eSwapchainCreateInfoKHR;
     createInfo.surface = mSurface;
     createInfo.minImageCount = imageCount;
-    createInfo.imageFormat = format.format;
-    createInfo.imageColorSpace = format.colorSpace;
-    createInfo.imageExtent = extent2D;
+    createInfo.imageFormat = mSwapChainImageFormat.format;
+    createInfo.imageColorSpace = mSwapChainImageFormat.colorSpace;
+    createInfo.imageExtent = mSwapChainExtent;
     createInfo.imageArrayLayers = 1;
     createInfo.imageUsage = vk::ImageUsageFlagBits::eColorAttachment;
 
     QueueFamilyIndices queueFamilyIndices = findQueueFamilies(mPhysicalDevice);
-    if(queueFamilyIndices.graphicQueueFamily== queueFamilyIndices.presentQueueFamily){
+    if (queueFamilyIndices.graphicQueueFamily == queueFamilyIndices.presentQueueFamily) {
         // 共用一个队列, 图片可以被队列独占, 这样效率最高
         createInfo.imageSharingMode = vk::SharingMode::eExclusive;
         createInfo.queueFamilyIndexCount = 0;
         createInfo.setQueueFamilyIndices(nullptr);
-    } else{
+    } else {
         // 2个队列
         createInfo.imageSharingMode = vk::SharingMode::eConcurrent;
         createInfo.queueFamilyIndexCount = 2;
@@ -504,7 +514,328 @@ void TriangleTest::createSwapChain() {
     createInfo.oldSwapchain = VK_NULL_HANDLE;
 
     mSwapChain = mDevice.createSwapchainKHR(createInfo);
+    // swapChainImages 由 swapChain 管理, swapChain销毁时, swapChainImages 会自动销毁
+    mSwapChainImages = mDevice.getSwapchainImagesKHR(mSwapChain);
+}
 
+void TriangleTest::createImageViews() {
+    mSwapChainImageViews.resize(mSwapChainImages.size());
+    for (int i = 0; i < mSwapChainImages.size(); i++) {
+        const auto &image = mSwapChainImages[i];
+
+        vk::ImageViewCreateInfo createInfo;
+        createInfo.sType = vk::StructureType::eImageViewCreateInfo;
+        createInfo.image = image;
+        createInfo.viewType = vk::ImageViewType::e2D;
+        createInfo.format = mSwapChainImageFormat.format;
+
+        createInfo.components.r = vk::ComponentSwizzle::eIdentity;
+        createInfo.components.g = vk::ComponentSwizzle::eIdentity;
+        createInfo.components.b = vk::ComponentSwizzle::eIdentity;
+        createInfo.components.a = vk::ComponentSwizzle::eIdentity;
+
+        createInfo.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
+        // mipmap
+        createInfo.subresourceRange.baseMipLevel = 0;
+        createInfo.subresourceRange.levelCount = 1;
+        // 多图层, 比如用于vr/3d, 左右眼各自有不同的图层, 这里在屏幕显示图片,只需要一个图层
+        createInfo.subresourceRange.baseArrayLayer = 0;
+        createInfo.subresourceRange.layerCount = 1;
+
+        mSwapChainImageViews[i] = mDevice.createImageView(createInfo);
+    }
+}
+
+void TriangleTest::cleanImageViews() {
+    for (auto imageView: mSwapChainImageViews) {
+        mDevice.destroy(imageView);
+    }
+}
+
+void TriangleTest::createRenderPass() {
+    vk::AttachmentDescription colorAttachmentDescription;
+    colorAttachmentDescription.setFormat(mSwapChainImageFormat.format);
+    colorAttachmentDescription.setSamples(vk::SampleCountFlagBits::e1);
+
+    //载入图像前将帧缓冲清0
+    colorAttachmentDescription.setLoadOp(vk::AttachmentLoadOp::eClear);
+
+    // 渲染图像之后将图像数据保存
+    colorAttachmentDescription.setStoreOp(vk::AttachmentStoreOp::eStore);
+
+    // 模版缓冲, 这里不关注
+    colorAttachmentDescription.setStencilLoadOp(vk::AttachmentLoadOp::eDontCare);
+    colorAttachmentDescription.setStencilStoreOp(vk::AttachmentStoreOp::eDontCare);
+
+    // 常见的布局
+    //
+    //VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL：用作彩色附件的图像
+    //VK_IMAGE_LAYOUT_PRESENT_SRC_KHR：要在交换链中呈现的图像
+    //VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL：用作内存复制操作目标的图像
+    //
+    // initialLayout 渲染通道开始之前图像将具有的布局
+    // finalLayout 渲染通道完成时自动转换到的布局
+    //
+    // 使用 VK_IMAGE_LAYOUT_UNDEFINED 意味着我们不关心图像以前的布局
+    // 这个特殊值的警告是图像的内容不能保证被保留，但这并不重要，因为我们无论如何要清除
+    colorAttachmentDescription.setInitialLayout(vk::ImageLayout::eUndefined);
+    // 我们希望图像在渲染后准备好使用交换链进行呈现，所以我们设置finalLayout 为 VK_IMAGE_LAYOUT_PRESENT_SRC_KHRas
+    colorAttachmentDescription.setFinalLayout(vk::ImageLayout::ePresentSrcKHR);
+
+    vk::AttachmentReference colorAttachmentReference;
+    // 多个 colorAttachmentDescription 组成数组, 上面只有一个 colorAttachmentDescription, 那么下标为 0
+    colorAttachmentReference.attachment = 0;
+    colorAttachmentReference.layout = vk::ImageLayout::eColorAttachmentOptimal;
+
+    vk::SubpassDescription subpassDescription;
+    subpassDescription.setPipelineBindPoint(vk::PipelineBindPoint::eGraphics);
+    subpassDescription.setColorAttachmentCount(1);
+    subpassDescription.setPColorAttachments(&colorAttachmentReference);
+
+    vk::RenderPassCreateInfo renderPassCreateInfo;
+    renderPassCreateInfo.sType = vk::StructureType::eRenderPassCreateInfo;
+    renderPassCreateInfo.setAttachmentCount(1);
+    renderPassCreateInfo.setPAttachments(&colorAttachmentDescription);
+    renderPassCreateInfo.setSubpassCount(1);
+    renderPassCreateInfo.setPSubpasses(&subpassDescription);
+    mRenderPass = mDevice.createRenderPass(renderPassCreateInfo);
+}
+
+void TriangleTest::createGraphicPipeline() {
+    auto vertexShaderCode = FileUtil::readFile("shader/vertex.spv");
+    auto fragmentShaderCode = FileUtil::readFile("shader/fragment.spv");
+
+    vk::ShaderModule vertexModule = createShaderModule(vertexShaderCode);
+    vk::ShaderModule fragmentModule = createShaderModule(fragmentShaderCode);
+
+    // input assembler
+    vk::PipelineInputAssemblyStateCreateInfo inputAssemblyStateCreateInfo;
+    inputAssemblyStateCreateInfo.sType = vk::StructureType::ePipelineInputAssemblyStateCreateInfo;
+    inputAssemblyStateCreateInfo.setTopology(vk::PrimitiveTopology::eTriangleList);
+    inputAssemblyStateCreateInfo.primitiveRestartEnable = vk::False;
+
+    std::vector<vk::DynamicState> dynamicStages = {
+            vk::DynamicState::eViewport,
+            vk::DynamicState::eScissor
+    };
+
+    vk::PipelineDynamicStateCreateInfo dynamicStateCreateInfo;
+    dynamicStateCreateInfo.sType = vk::StructureType::ePipelineDynamicStateCreateInfo;
+    dynamicStateCreateInfo.dynamicStateCount = dynamicStages.size();
+    dynamicStateCreateInfo.pDynamicStates = dynamicStages.data();
+
+    vk::Viewport viewport;
+    viewport.x = 0.0f;
+    viewport.y = 0.0f;
+    viewport.width = (float) mSwapChainExtent.width;
+    viewport.height = (float) mSwapChainExtent.height;
+    viewport.minDepth = 0.0f;
+    viewport.maxDepth = 1.0f;
+
+    vk::Rect2D scissor{};
+    scissor.offset = vk::Offset2D{0, 0};
+    scissor.extent = mSwapChainExtent;
+
+    vk::PipelineViewportStateCreateInfo viewportStateCreateInfo;
+    viewportStateCreateInfo.sType = vk::StructureType::ePipelineViewportStateCreateInfo;
+    viewportStateCreateInfo.viewportCount = 1;
+    viewportStateCreateInfo.setPViewports(&viewport);
+    viewportStateCreateInfo.scissorCount = 1;
+    viewportStateCreateInfo.setPScissors(&scissor);
+
+    // vertex shader
+    vk::PipelineVertexInputStateCreateInfo vertexInputStateCreateInfo;
+    vertexInputStateCreateInfo.sType = vk::StructureType::ePipelineVertexInputStateCreateInfo;
+    vertexInputStateCreateInfo.vertexBindingDescriptionCount = 0;
+    vertexInputStateCreateInfo.pVertexBindingDescriptions = nullptr;
+    vertexInputStateCreateInfo.vertexAttributeDescriptionCount = 0;
+    vertexInputStateCreateInfo.pVertexAttributeDescriptions = nullptr;
+
+    vk::PipelineShaderStageCreateInfo vertexShaderStageCreateInfo;
+    vertexShaderStageCreateInfo.sType = vk::StructureType::eShaderCreateInfoEXT;
+    vertexShaderStageCreateInfo.setStage(vk::ShaderStageFlagBits::eVertex);
+    vertexShaderStageCreateInfo.setModule(vertexModule);
+    vertexShaderStageCreateInfo.setPName("main");
+    vertexShaderStageCreateInfo.setPSpecializationInfo(nullptr);
+
+    // tessellation
+
+    // geometry shader
+
+    // rasterization
+    vk::PipelineRasterizationStateCreateInfo rasterizationStateCreateInfo;
+    rasterizationStateCreateInfo.sType = vk::StructureType::ePipelineRasterizationStateCreateInfo;
+
+    // 如果depthClampEnable设置为VK_TRUE，则超出近平面和远平面的片段将被夹紧，而不是丢弃它们。这在某些特殊情况下很有用，例如阴影贴图。使用此功能需要启用 GPU 功能。
+    rasterizationStateCreateInfo.setDepthClampEnable(vk::True);
+
+    // 如果rasterizerDiscardEnable设置为VK_TRUE，则几何图形永远不会通过光栅化阶段。这基本上禁用了帧缓冲区的任何输出。
+    rasterizationStateCreateInfo.setRasterizerDiscardEnable(vk::False);
+
+    //确定polygonMode如何为几何体生成片段。可以使用以下模式：
+    //
+    //VK_POLYGON_MODE_FILL：用碎片填充多边形区域
+    //VK_POLYGON_MODE_LINE：多边形边缘绘制为线
+    //VK_POLYGON_MODE_POINT：多边形顶点绘制为点
+    rasterizationStateCreateInfo.setPolygonMode(vk::PolygonMode::eFill);
+    // 使用填充以外的任何模式都需要设置 lineWidth :
+    rasterizationStateCreateInfo.setLineWidth(1.0f);
+    // 设置面剔除策略, 这里设置为反面被剔除
+    rasterizationStateCreateInfo.setCullMode(vk::CullModeFlagBits::eBack);
+    // 设置正面的方向, 这设置为顺时针为正面
+    rasterizationStateCreateInfo.setFrontFace(vk::FrontFace::eClockwise);
+
+    rasterizationStateCreateInfo.setDepthBiasEnable(vk::False);
+    rasterizationStateCreateInfo.setDepthBiasConstantFactor(0.0f);
+    rasterizationStateCreateInfo.setDepthBiasClamp(0.0f);
+    rasterizationStateCreateInfo.setDepthBiasSlopeFactor(0.0f);
+
+    // depth & stencil testing
+    vk::PipelineDepthStencilStateCreateInfo depthStencilStateCreateInfo;
+    depthStencilStateCreateInfo.sType = vk::StructureType::ePipelineDepthStencilStateCreateInfo;
+
+
+
+    // Multisampling
+    vk::PipelineMultisampleStateCreateInfo multisampleStateCreateInfo;
+    multisampleStateCreateInfo.sType = vk::StructureType::ePipelineMultisampleStateCreateInfo;
+    multisampleStateCreateInfo.setSampleShadingEnable(vk::False);
+    multisampleStateCreateInfo.setRasterizationSamples(vk::SampleCountFlagBits::e1);
+    multisampleStateCreateInfo.setMinSampleShading(1.0f);
+    multisampleStateCreateInfo.setPSampleMask(nullptr);
+    multisampleStateCreateInfo.setAlphaToCoverageEnable(vk::False);
+    multisampleStateCreateInfo.setAlphaToOneEnable(vk::False);
+
+    // fragment shader
+    vk::PipelineShaderStageCreateInfo fragmentShaderStageCreateInfo;
+    fragmentShaderStageCreateInfo.sType = vk::StructureType::eShaderCreateInfoEXT;
+    fragmentShaderStageCreateInfo.setStage(vk::ShaderStageFlagBits::eFragment);
+    fragmentShaderStageCreateInfo.setModule(fragmentModule);
+    fragmentShaderStageCreateInfo.setPName("main");
+    fragmentShaderStageCreateInfo.setPSpecializationInfo(nullptr);
+
+    // color blending
+    vk::PipelineColorBlendAttachmentState colorBlendAttachmentState{};
+    colorBlendAttachmentState.setColorWriteMask(vk::ColorComponentFlagBits::eR
+                                                | vk::ColorComponentFlagBits::eG
+                                                | vk::ColorComponentFlagBits::eB
+                                                | vk::ColorComponentFlagBits::eA);
+//    colorBlendAttachmentState.setBlendEnable(vk::False);
+//
+//    // rgb = src.rgb*1 + dst.rgb*0
+//    colorBlendAttachmentState.setSrcColorBlendFactor(vk::BlendFactor::eOne);
+//    colorBlendAttachmentState.setDstColorBlendFactor(vk::BlendFactor::eZero);
+//    colorBlendAttachmentState.setColorBlendOp(vk::BlendOp::eAdd);
+//
+//    // a = src.a*1+dst.a*1
+//    colorBlendAttachmentState.setSrcAlphaBlendFactor(vk::BlendFactor::eOne);
+//    colorBlendAttachmentState.setDstAlphaBlendFactor(vk::BlendFactor::eZero);
+//    colorBlendAttachmentState.setAlphaBlendOp(vk::BlendOp::eAdd);
+
+    // 伪代码:
+    // if (blendEnable) {
+    //    finalColor.rgb = (srcColorBlendFactor * newColor.rgb) <colorBlendOp> (dstColorBlendFactor * oldColor.rgb);
+    //    finalColor.a = (srcAlphaBlendFactor * newColor.a) <alphaBlendOp> (dstAlphaBlendFactor * oldColor.a);
+    //} else {
+    //    finalColor = newColor;
+    //}
+    //
+    //finalColor = finalColor & colorWriteMask;
+
+    // 常用的混合模式是透明混合
+    // finalColor.rgb = newAlpha * newColor + (1 - newAlpha) * oldColor;
+    // finalColor.a = newAlpha.a;
+    colorBlendAttachmentState.setBlendEnable(vk::True);
+
+    colorBlendAttachmentState.setSrcColorBlendFactor(vk::BlendFactor::eSrcAlpha);
+    colorBlendAttachmentState.setDstColorBlendFactor(vk::BlendFactor::eOneMinusSrcAlpha);
+    colorBlendAttachmentState.setColorBlendOp(vk::BlendOp::eAdd);
+
+    colorBlendAttachmentState.setSrcAlphaBlendFactor(vk::BlendFactor::eOne);
+    colorBlendAttachmentState.setDstAlphaBlendFactor(vk::BlendFactor::eZero);
+    colorBlendAttachmentState.setAlphaBlendOp(vk::BlendOp::eAdd);
+
+    vk::PipelineColorBlendStateCreateInfo colorBlendStateCreateInfo;
+    colorBlendStateCreateInfo.sType = vk::StructureType::ePipelineColorBlendStateCreateInfo;
+    colorBlendStateCreateInfo.logicOpEnable = vk::False;
+    colorBlendStateCreateInfo.logicOp = vk::LogicOp::eCopy;
+    colorBlendStateCreateInfo.attachmentCount = 1;
+    colorBlendStateCreateInfo.setPAttachments(&colorBlendAttachmentState);
+    colorBlendStateCreateInfo.setBlendConstants(std::array<float, 4>{0.0f, 0.0f, 0.0f, 0.0f});
+
+    vk::PipelineShaderStageCreateInfo shaderStageCreateInfos[] = {vertexShaderStageCreateInfo, fragmentShaderStageCreateInfo};
+
+    vk::PipelineLayoutCreateInfo pipelineLayoutCreateInfo;
+    pipelineLayoutCreateInfo.sType = vk::StructureType::ePipelineLayoutCreateInfo;
+    pipelineLayoutCreateInfo.setSetLayoutCount(0);
+    pipelineLayoutCreateInfo.setPSetLayouts(nullptr);
+    pipelineLayoutCreateInfo.setPushConstantRangeCount(0);
+    pipelineLayoutCreateInfo.setPPushConstantRanges(nullptr);
+
+    mPipelineLayout = mDevice.createPipelineLayout(pipelineLayoutCreateInfo);
+
+    vk::GraphicsPipelineCreateInfo graphicsPipelineCreateInfo;
+    graphicsPipelineCreateInfo.sType = vk::StructureType::eGraphicsPipelineCreateInfo;
+    graphicsPipelineCreateInfo.setStageCount(2);
+    graphicsPipelineCreateInfo.setPStages(shaderStageCreateInfos);
+    graphicsPipelineCreateInfo.setPVertexInputState(&vertexInputStateCreateInfo);
+    graphicsPipelineCreateInfo.setPInputAssemblyState(&inputAssemblyStateCreateInfo);
+    graphicsPipelineCreateInfo.setPViewportState(&viewportStateCreateInfo);
+    graphicsPipelineCreateInfo.setPRasterizationState(&rasterizationStateCreateInfo);
+    graphicsPipelineCreateInfo.setPMultisampleState(&multisampleStateCreateInfo);
+    graphicsPipelineCreateInfo.setPDepthStencilState(&depthStencilStateCreateInfo);
+    graphicsPipelineCreateInfo.setPColorBlendState(&colorBlendStateCreateInfo);
+    graphicsPipelineCreateInfo.setPDynamicState(&dynamicStateCreateInfo);
+    graphicsPipelineCreateInfo.setLayout(mPipelineLayout);
+    graphicsPipelineCreateInfo.setRenderPass(mRenderPass);
+    graphicsPipelineCreateInfo.setSubpass(0);
+    graphicsPipelineCreateInfo.setBasePipelineHandle(VK_NULL_HANDLE);
+    graphicsPipelineCreateInfo.setBasePipelineIndex(-1);
+
+    auto pipelineCreateResult = mDevice.createGraphicsPipeline(VK_NULL_HANDLE, graphicsPipelineCreateInfo);
+    if (pipelineCreateResult.result != vk::Result::eSuccess) {
+        throw std::runtime_error("createGraphicsPipelines failed");
+    }
+    mPipeline = pipelineCreateResult.value;
+
+    mDevice.destroy(vertexModule);
+    mDevice.destroy(fragmentModule);
+}
+
+vk::ShaderModule TriangleTest::createShaderModule(const std::vector<char> &code) {
+    vk::ShaderModuleCreateInfo createInfo;
+    createInfo.sType = vk::StructureType::eShaderModuleCreateInfo;
+    createInfo.codeSize = code.size();
+    createInfo.pCode = reinterpret_cast<const uint32_t *>(code.data());
+
+    return mDevice.createShaderModule(createInfo);
+}
+
+void TriangleTest::createFrameBuffer() {
+    mSwapChainFrameBuffers.resize(mSwapChainImageViews.size());
+
+    for (int i = 0; i < mSwapChainImageViews.size(); i++) {
+        vk::ImageView attachments[] = {
+                mSwapChainImageViews[i]
+        };
+
+        vk::FramebufferCreateInfo framebufferCreateInfo{};
+        framebufferCreateInfo.sType = vk::StructureType::eFramebufferCreateInfo;
+        framebufferCreateInfo.setRenderPass(mRenderPass);
+        framebufferCreateInfo.setAttachmentCount(1);
+        framebufferCreateInfo.setPAttachments(attachments);
+        framebufferCreateInfo.setWidth(mSwapChainExtent.width);
+        framebufferCreateInfo.setHeight(mSwapChainExtent.height);
+        framebufferCreateInfo.setLayers(1);
+
+        mSwapChainFrameBuffers[i] = mDevice.createFramebuffer(framebufferCreateInfo);
+    }
+}
+
+void TriangleTest::cleanFrameBuffers() {
+    for (auto swapChainFrameBuffer : mSwapChainFrameBuffers) {
+        mDevice.destroy(swapChainFrameBuffer);
+    }
 }
 
 vk::Result CreateDebugUtilsMessengerEXT(vk::Instance instance,

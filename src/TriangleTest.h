@@ -63,6 +63,22 @@ private:
 
     vk::SwapchainKHR mSwapChain;
 
+    vk::SurfaceFormatKHR mSwapChainImageFormat;
+
+    vk::Extent2D mSwapChainExtent;
+
+    std::vector<vk::Image> mSwapChainImages;
+
+    std::vector<vk::ImageView> mSwapChainImageViews;
+
+    vk::RenderPass mRenderPass;
+
+    vk::PipelineLayout mPipelineLayout;
+
+    vk::Pipeline mPipeline;
+
+    std::vector<vk::Framebuffer> mSwapChainFrameBuffers;
+
 public:
     TriangleTest();
 
@@ -113,6 +129,20 @@ private:
     vk::Extent2D chooseSwapExtent(const vk::SurfaceCapabilitiesKHR& capability);
 
     void createSwapChain();
+
+    void createImageViews();
+
+    void cleanImageViews();
+
+    void createGraphicPipeline();
+
+    vk::ShaderModule createShaderModule(const std::vector<char>& code);
+
+    void createRenderPass();
+
+    void createFrameBuffer();
+
+    void cleanFrameBuffers();
 };
 
 
