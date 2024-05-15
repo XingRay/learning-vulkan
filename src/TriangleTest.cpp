@@ -896,7 +896,7 @@ void TriangleTest::recordCommandBuffer(uint32_t imageIndex) {
     renderPassBeginInfo.renderArea.setOffset(vk::Offset2D{0, 0});
     renderPassBeginInfo.renderArea.setExtent(mSwapChainExtent);
 
-    vk::ClearValue clearValue = vk::ClearValue{std::array<float, 4>{0.0f, 0.0f, 0.0f, 1.0f}};
+    vk::ClearValue clearValue = vk::ClearValue{mClearColor};
     renderPassBeginInfo.setClearValueCount(1);
     renderPassBeginInfo.setPClearValues(&clearValue);
 

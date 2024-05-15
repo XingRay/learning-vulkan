@@ -24,8 +24,9 @@ public:
     // public fields
 private:
     // private fields
-    const int32_t mWidth = 800;
-    const int32_t mHeight = 600;
+    const int32_t mWidth = (int32_t)(1024*1.118);
+    const int32_t mHeight = 1024;
+    const std::array<float, 4> mClearColor = {0.05f, 0.05f, 0.05f, 1.0f};
 
     const std::vector<const char *> mValidationLayers = {
             "VK_LAYER_KHRONOS_validation"
