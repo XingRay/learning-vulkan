@@ -60,23 +60,29 @@ void TriangleTest::initVulkan() {
     createSwapChain();
     createImageViews();
     createRenderPass();
-    createGraphicPipeline();
-    createFrameBuffer();
+    createGraphicsPipeline();
+    createFrameBuffers();
+    createCommandPool();
+    createCommandBuffer();
+    createSyncObjects();
 }
 
 void TriangleTest::mainLoop() {
     while (!glfwWindowShouldClose(mWindow)) {
         glfwPollEvents();
+        drawFrame();
     }
+
+    // 等待所有任务执行完成
+    mDevice.waitIdle();
 }
 
 void TriangleTest::cleanUp() {
-    if (mEnableValidationLayer) {
-        destroyDebugUtilsMessengerExt(nullptr);
-    }
 
+    cleanSyncObjects();
+    mDevice.destroy(mCommandPool);
     cleanFrameBuffers();
-    mDevice.destroy(mPipeline);
+    mDevice.destroy(mGraphicsPipeline);
     mDevice.destroy(mPipelineLayout);
     mDevice.destroy(mRenderPass);
     cleanImageViews();
@@ -84,6 +90,9 @@ void TriangleTest::cleanUp() {
     mDevice.destroy();
 
     mInstance.destroy(mSurface);
+    if (mEnableValidationLayer) {
+        destroyDebugUtilsMessengerExt(nullptr);
+    }
     mInstance.destroy();
 
     glfwDestroyWindow(mWindow);
@@ -95,19 +104,19 @@ void TriangleTest::createInstance() {
 
     vk::ApplicationInfo appInfo;
     appInfo.sType = vk::StructureType::eApplicationInfo;
-    appInfo.setPApplicationName("triangle test");
-    appInfo.setApplicationVersion(VK_MAKE_VERSION(1, 0, 0));
-    appInfo.setPEngineName("no engine");
-    appInfo.setEngineVersion(VK_MAKE_VERSION(1, 0, 0));
+//    appInfo.setPApplicationName("triangle test");
+//    appInfo.setApplicationVersion(VK_MAKE_VERSION(1, 0, 0));
+//    appInfo.setPEngineName("no engine");
+//    appInfo.setEngineVersion(VK_MAKE_VERSION(1, 0, 0));
     appInfo.setApiVersion(VK_API_VERSION_1_3);
 
     vk::InstanceCreateInfo createInfo;
-    createInfo.pApplicationInfo = &appInfo;
     createInfo.sType = vk::StructureType::eInstanceCreateInfo;
+    createInfo.setPApplicationInfo(&appInfo);
 
     std::vector<const char *> extensions = getRequiredExtensions();
-    createInfo.enabledExtensionCount = extensions.size();
-    createInfo.setPpEnabledExtensionNames(extensions.data());
+//    createInfo.setEnabledExtensionCount(extensions.size());
+    createInfo.setPEnabledExtensionNames(extensions);
     std::cout << "extensions \n";
     for (auto &extension: extensions) {
         std::cout << '\t' << extension << std::endl;
@@ -118,7 +127,7 @@ void TriangleTest::createInstance() {
         if (!checkValidationLayerSupported()) {
             throw std::runtime_error("validation layers required, but not available !");
         }
-        createInfo.setPpEnabledLayerNames(mValidationLayers.data());
+        createInfo.setPEnabledLayerNames(mValidationLayers);
 
         populateDebugMessengerCreateInfo(debugCreateInfo);
         createInfo.pNext = &debugCreateInfo;
@@ -482,8 +491,9 @@ void TriangleTest::createSwapChain() {
     if (capabilities.maxImageCount > 0 && imageCount > capabilities.maxImageCount) {
         imageCount = capabilities.maxImageCount;
     }
+    std::cout << "imageCount: " << imageCount << std::endl;
 
-    vk::SwapchainCreateInfoKHR createInfo;
+    vk::SwapchainCreateInfoKHR createInfo{};
     createInfo.sType = vk::StructureType::eSwapchainCreateInfoKHR;
     createInfo.surface = mSurface;
     createInfo.minImageCount = imageCount;
@@ -504,13 +514,14 @@ void TriangleTest::createSwapChain() {
         createInfo.imageSharingMode = vk::SharingMode::eConcurrent;
         createInfo.queueFamilyIndexCount = 2;
         uint32_t indices[]{queueFamilyIndices.graphicQueueFamily.value(), queueFamilyIndices.presentQueueFamily.value()};
-        createInfo.setQueueFamilyIndices(indices);
+        createInfo.setPQueueFamilyIndices(indices);
     }
 
     createInfo.preTransform = capabilities.currentTransform;
     createInfo.compositeAlpha = vk::CompositeAlphaFlagBitsKHR::eOpaque;
     createInfo.presentMode = presentMode;
     createInfo.clipped = vk::True;
+
     createInfo.oldSwapchain = VK_NULL_HANDLE;
 
     mSwapChain = mDevice.createSwapchainKHR(createInfo);
@@ -587,10 +598,21 @@ void TriangleTest::createRenderPass() {
     colorAttachmentReference.attachment = 0;
     colorAttachmentReference.layout = vk::ImageLayout::eColorAttachmentOptimal;
 
+
     vk::SubpassDescription subpassDescription;
     subpassDescription.setPipelineBindPoint(vk::PipelineBindPoint::eGraphics);
     subpassDescription.setColorAttachmentCount(1);
     subpassDescription.setPColorAttachments(&colorAttachmentReference);
+
+
+    vk::SubpassDependency subpassDependency;
+    subpassDependency.setSrcSubpass(vk::SubpassExternal);
+    subpassDependency.setDstSubpass(0);
+    subpassDependency.setSrcStageMask(vk::PipelineStageFlagBits::eColorAttachmentOutput);
+    subpassDependency.setSrcAccessMask(vk::AccessFlagBits::eNone);
+    subpassDependency.setDstStageMask(vk::PipelineStageFlagBits::eColorAttachmentOutput);
+    subpassDependency.setDstAccessMask(vk::AccessFlagBits::eColorAttachmentWrite);
+
 
     vk::RenderPassCreateInfo renderPassCreateInfo;
     renderPassCreateInfo.sType = vk::StructureType::eRenderPassCreateInfo;
@@ -598,10 +620,14 @@ void TriangleTest::createRenderPass() {
     renderPassCreateInfo.setPAttachments(&colorAttachmentDescription);
     renderPassCreateInfo.setSubpassCount(1);
     renderPassCreateInfo.setPSubpasses(&subpassDescription);
+    renderPassCreateInfo.setDependencyCount(1);
+    renderPassCreateInfo.setPDependencies(&subpassDependency);
+
+
     mRenderPass = mDevice.createRenderPass(renderPassCreateInfo);
 }
 
-void TriangleTest::createGraphicPipeline() {
+void TriangleTest::createGraphicsPipeline() {
     auto vertexShaderCode = FileUtil::readFile("shader/vertex.spv");
     auto fragmentShaderCode = FileUtil::readFile("shader/fragment.spv");
 
@@ -652,7 +678,7 @@ void TriangleTest::createGraphicPipeline() {
     vertexInputStateCreateInfo.pVertexAttributeDescriptions = nullptr;
 
     vk::PipelineShaderStageCreateInfo vertexShaderStageCreateInfo;
-    vertexShaderStageCreateInfo.sType = vk::StructureType::eShaderCreateInfoEXT;
+    vertexShaderStageCreateInfo.sType = vk::StructureType::ePipelineShaderStageCreateInfo;
     vertexShaderStageCreateInfo.setStage(vk::ShaderStageFlagBits::eVertex);
     vertexShaderStageCreateInfo.setModule(vertexModule);
     vertexShaderStageCreateInfo.setPName("main");
@@ -667,7 +693,7 @@ void TriangleTest::createGraphicPipeline() {
     rasterizationStateCreateInfo.sType = vk::StructureType::ePipelineRasterizationStateCreateInfo;
 
     // 如果depthClampEnable设置为VK_TRUE，则超出近平面和远平面的片段将被夹紧，而不是丢弃它们。这在某些特殊情况下很有用，例如阴影贴图。使用此功能需要启用 GPU 功能。
-    rasterizationStateCreateInfo.setDepthClampEnable(vk::True);
+    rasterizationStateCreateInfo.setDepthClampEnable(vk::False);
 
     // 如果rasterizerDiscardEnable设置为VK_TRUE，则几何图形永远不会通过光栅化阶段。这基本上禁用了帧缓冲区的任何输出。
     rasterizationStateCreateInfo.setRasterizerDiscardEnable(vk::False);
@@ -708,7 +734,7 @@ void TriangleTest::createGraphicPipeline() {
 
     // fragment shader
     vk::PipelineShaderStageCreateInfo fragmentShaderStageCreateInfo;
-    fragmentShaderStageCreateInfo.sType = vk::StructureType::eShaderCreateInfoEXT;
+    fragmentShaderStageCreateInfo.sType = vk::StructureType::ePipelineShaderStageCreateInfo;
     fragmentShaderStageCreateInfo.setStage(vk::ShaderStageFlagBits::eFragment);
     fragmentShaderStageCreateInfo.setModule(fragmentModule);
     fragmentShaderStageCreateInfo.setPName("main");
@@ -796,7 +822,7 @@ void TriangleTest::createGraphicPipeline() {
     if (pipelineCreateResult.result != vk::Result::eSuccess) {
         throw std::runtime_error("createGraphicsPipelines failed");
     }
-    mPipeline = pipelineCreateResult.value;
+    mGraphicsPipeline = pipelineCreateResult.value;
 
     mDevice.destroy(vertexModule);
     mDevice.destroy(fragmentModule);
@@ -811,7 +837,7 @@ vk::ShaderModule TriangleTest::createShaderModule(const std::vector<char> &code)
     return mDevice.createShaderModule(createInfo);
 }
 
-void TriangleTest::createFrameBuffer() {
+void TriangleTest::createFrameBuffers() {
     mSwapChainFrameBuffers.resize(mSwapChainImageViews.size());
 
     for (int i = 0; i < mSwapChainImageViews.size(); i++) {
@@ -832,11 +858,154 @@ void TriangleTest::createFrameBuffer() {
     }
 }
 
+void TriangleTest::createCommandPool() {
+    QueueFamilyIndices queueFamilyIndices = findQueueFamilies(mPhysicalDevice);
+
+    vk::CommandPoolCreateInfo commandPoolCreateInfo{};
+    commandPoolCreateInfo.sType = vk::StructureType::eCommandPoolCreateInfo;
+    commandPoolCreateInfo.setFlags(vk::CommandPoolCreateFlagBits::eResetCommandBuffer);
+    commandPoolCreateInfo.setQueueFamilyIndex(queueFamilyIndices.graphicQueueFamily.value());
+
+    mCommandPool = mDevice.createCommandPool(commandPoolCreateInfo);
+}
+
+void TriangleTest::createCommandBuffer() {
+    vk::CommandBufferAllocateInfo commandBufferAllocateInfo;
+    commandBufferAllocateInfo.sType = vk::StructureType::eCommandBufferAllocateInfo;
+    commandBufferAllocateInfo.setCommandPool(mCommandPool);
+    commandBufferAllocateInfo.setLevel(vk::CommandBufferLevel::ePrimary);
+    // 只创建一个命令缓冲区
+    commandBufferAllocateInfo.setCommandBufferCount(1);
+
+    // 返回 vector<CommandBuffer>, 取 [0]
+    mCommandBuffer = mDevice.allocateCommandBuffers(commandBufferAllocateInfo)[0];
+    // mCommandBuffer 当 CommandPool 被销毁时会自动销毁, 不需要手动销毁
+}
+
+void TriangleTest::recordCommandBuffer(uint32_t imageIndex) {
+    vk::CommandBufferBeginInfo commandBufferBeginInfo;
+    commandBufferBeginInfo.sType = vk::StructureType::eCommandBufferBeginInfo;
+//    commandBufferBeginInfo.setFlags(vk::CommandBufferUsageFlagBits::eOneTimeSubmit);
+//    commandBufferBeginInfo.setPInheritanceInfo(nullptr);
+    mCommandBuffer.begin(commandBufferBeginInfo);
+
+    vk::RenderPassBeginInfo renderPassBeginInfo{};
+    renderPassBeginInfo.sType = vk::StructureType::eRenderPassBeginInfo;
+    renderPassBeginInfo.setRenderPass(mRenderPass);
+    renderPassBeginInfo.setFramebuffer(mSwapChainFrameBuffers[imageIndex]);
+    renderPassBeginInfo.renderArea.setOffset(vk::Offset2D{0, 0});
+    renderPassBeginInfo.renderArea.setExtent(mSwapChainExtent);
+
+    vk::ClearValue clearValue = vk::ClearValue{std::array<float, 4>{0.0f, 0.0f, 0.0f, 1.0f}};
+    renderPassBeginInfo.setClearValueCount(1);
+    renderPassBeginInfo.setPClearValues(&clearValue);
+
+    mCommandBuffer.beginRenderPass(&renderPassBeginInfo, vk::SubpassContents::eInline);
+    {
+        mCommandBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics, mGraphicsPipeline);
+
+        vk::Viewport viewport;
+        viewport.x = 0.0f;
+        viewport.y = 0.0f;
+        viewport.width = (float) mSwapChainExtent.width;
+        viewport.height = (float) mSwapChainExtent.height;
+        viewport.minDepth = 0.0f;
+        viewport.maxDepth = 1.0f;
+        mCommandBuffer.setViewport(0, 1, &viewport);
+
+        vk::Rect2D scissor{};
+        scissor.offset = vk::Offset2D{0, 0};
+        scissor.extent = mSwapChainExtent;
+        mCommandBuffer.setScissor(0, 1, &scissor);
+
+        // vertexCount：即使我们没有顶点缓冲区，从技术上讲我们仍然有 3 个顶点要绘制。
+        // instanceCount：用于实例渲染，1如果您不这样做，请使用。
+        // firstVertex：用作顶点缓冲区的偏移量，定义 的最小值gl_VertexIndex。
+        // firstInstance：用作实例渲染的偏移量，定义 的最小值gl_InstanceIndex。
+        mCommandBuffer.draw(3, 1, 0, 0);
+    }
+    mCommandBuffer.endRenderPass();
+    mCommandBuffer.end();
+}
+
+
+void TriangleTest::drawFrame() {
+    vk::Result result = mDevice.waitForFences(1, &mInFlightFence, vk::True, std::numeric_limits<uint64_t>::max());
+    if (result != vk::Result::eSuccess) {
+        throw std::runtime_error("waitForFences failed");
+    }
+    result = mDevice.resetFences(1, &mInFlightFence);
+    if (result != vk::Result::eSuccess) {
+        throw std::runtime_error("resetFences failed");
+    }
+
+    auto acquireResult = mDevice.acquireNextImageKHR(mSwapChain, std::numeric_limits<uint64_t>::max(), mImageAvailableSemaphore);
+    if (acquireResult.result != vk::Result::eSuccess) {
+        throw std::runtime_error("acquireNextImageKHR failed");
+    }
+    uint32_t imageIndex = acquireResult.value;
+
+    mCommandBuffer.reset();
+    recordCommandBuffer(imageIndex);
+
+    vk::SubmitInfo submitInfo{};
+    submitInfo.sType = vk::StructureType::eSubmitInfo;
+
+    vk::Semaphore waitSemaphores[] = {mImageAvailableSemaphore};
+    vk::PipelineStageFlags waitStages[] = {vk::PipelineStageFlagBits::eColorAttachmentOutput};
+    submitInfo.setWaitSemaphoreCount(1);
+    submitInfo.setPWaitSemaphores(waitSemaphores);
+    submitInfo.setPWaitDstStageMask(waitStages);
+    submitInfo.setCommandBufferCount(1);
+    submitInfo.setPCommandBuffers(&mCommandBuffer);
+
+    vk::Semaphore signalSemaphores[] = {mRenderFinishedSemaphore};
+    submitInfo.setSignalSemaphoreCount(1);
+    submitInfo.setPSignalSemaphores(signalSemaphores);
+
+    result = mGraphicQueue.submit(1, &submitInfo, mInFlightFence);
+    if (result != vk::Result::eSuccess) {
+        throw std::runtime_error("graphicQueue.submit failed");
+    }
+
+    vk::PresentInfoKHR presentInfo{};
+    presentInfo.sType = vk::StructureType::ePresentInfoKHR;
+    presentInfo.setWaitSemaphores(signalSemaphores);
+    presentInfo.setSwapchains(mSwapChain);
+    presentInfo.setImageIndices(imageIndex);
+
+    result = mPresentQueue.presentKHR(presentInfo);
+    if (result != vk::Result::eSuccess) {
+        throw std::runtime_error("presentKHR failed");
+    }
+}
+
 void TriangleTest::cleanFrameBuffers() {
-    for (auto swapChainFrameBuffer : mSwapChainFrameBuffers) {
+    for (auto swapChainFrameBuffer: mSwapChainFrameBuffers) {
         mDevice.destroy(swapChainFrameBuffer);
     }
 }
+
+void TriangleTest::createSyncObjects() {
+    vk::SemaphoreCreateInfo semaphoreCreateInfo;
+    semaphoreCreateInfo.sType = vk::StructureType::eSemaphoreCreateInfo;
+
+    vk::FenceCreateInfo fenceCreateInfo;
+    fenceCreateInfo.sType = vk::StructureType::eFenceCreateInfo;
+    // 已发出信号的状态下创建栅栏，以便第一次调用 vkWaitForFences()立即返回
+    fenceCreateInfo.flags = vk::FenceCreateFlagBits::eSignaled;
+
+    mImageAvailableSemaphore = mDevice.createSemaphore(semaphoreCreateInfo);
+    mRenderFinishedSemaphore = mDevice.createSemaphore(semaphoreCreateInfo);
+    mInFlightFence = mDevice.createFence(fenceCreateInfo);
+}
+
+void TriangleTest::cleanSyncObjects() {
+    mDevice.destroy(mImageAvailableSemaphore);
+    mDevice.destroy(mRenderFinishedSemaphore);
+    mDevice.destroy(mInFlightFence);
+}
+
 
 vk::Result CreateDebugUtilsMessengerEXT(vk::Instance instance,
                                         const vk::DebugUtilsMessengerCreateInfoEXT *pCreateInfo,

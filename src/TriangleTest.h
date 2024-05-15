@@ -75,9 +75,19 @@ private:
 
     vk::PipelineLayout mPipelineLayout;
 
-    vk::Pipeline mPipeline;
+    vk::Pipeline mGraphicsPipeline;
 
     std::vector<vk::Framebuffer> mSwapChainFrameBuffers;
+
+    vk::CommandPool mCommandPool;
+
+    vk::CommandBuffer mCommandBuffer;
+
+    vk::Semaphore mImageAvailableSemaphore;
+
+    vk::Semaphore mRenderFinishedSemaphore;
+
+    vk::Fence mInFlightFence;
 
 public:
     TriangleTest();
@@ -134,15 +144,27 @@ private:
 
     void cleanImageViews();
 
-    void createGraphicPipeline();
+    void createGraphicsPipeline();
 
     vk::ShaderModule createShaderModule(const std::vector<char>& code);
 
     void createRenderPass();
 
-    void createFrameBuffer();
+    void createFrameBuffers();
 
     void cleanFrameBuffers();
+
+    void createCommandPool();
+
+    void createCommandBuffer();
+
+    void recordCommandBuffer(uint32_t imageIndex);
+
+    void drawFrame();
+
+    void createSyncObjects();
+
+    void cleanSyncObjects();
 };
 
 
