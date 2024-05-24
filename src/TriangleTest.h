@@ -18,15 +18,17 @@
 #include "SwapChainSupportDetail.h"
 
 
-
 class TriangleTest {
 public:
     // public fields
 private:
     // private fields
-    const int32_t mWidth = (int32_t)(1024*1.118);
+    const int32_t mWidth = (int32_t) (1024 * 1.118);
     const int32_t mHeight = 1024;
     const std::array<float, 4> mClearColor = {0.05f, 0.05f, 0.05f, 1.0f};
+
+    // 同时处理的帧数
+    const int MAX_FRAMES_IN_FLIGHT = 2;
 
     const std::vector<const char *> mValidationLayers = {
             "VK_LAYER_KHRONOS_validation"
@@ -82,13 +84,17 @@ private:
 
     vk::CommandPool mCommandPool;
 
-    vk::CommandBuffer mCommandBuffer;
 
-    vk::Semaphore mImageAvailableSemaphore;
+    // todo mCommandBuffers mImageAvailableSemaphores mRenderFinishedSemaphores mInFlightFences 组织成对象数组
+    std::vector<vk::CommandBuffer> mCommandBuffers;
 
-    vk::Semaphore mRenderFinishedSemaphore;
+    std::vector<vk::Semaphore> mImageAvailableSemaphores;
 
-    vk::Fence mInFlightFence;
+    std::vector<vk::Semaphore> mRenderFinishedSemaphores;
+
+    std::vector<vk::Fence> mInFlightFences;
+
+    uint32_t mCurrentFrame = 0;
 
 public:
     TriangleTest();
@@ -131,13 +137,13 @@ private:
 
     bool isDeviceSupportedRequiredExtensions(vk::PhysicalDevice device);
 
-    SwapChainSupportDetail querySwapChainSupported(vk::PhysicalDevice& device);
+    SwapChainSupportDetail querySwapChainSupported(vk::PhysicalDevice &device);
 
-    vk::SurfaceFormatKHR chooseSwapSurfaceFormat(const std::vector<vk::SurfaceFormatKHR>& availableFormats);
+    vk::SurfaceFormatKHR chooseSwapSurfaceFormat(const std::vector<vk::SurfaceFormatKHR> &availableFormats);
 
-    vk::PresentModeKHR choosePresentMode(const std::vector<vk::PresentModeKHR>& availablePresentModes);
+    vk::PresentModeKHR choosePresentMode(const std::vector<vk::PresentModeKHR> &availablePresentModes);
 
-    vk::Extent2D chooseSwapExtent(const vk::SurfaceCapabilitiesKHR& capability);
+    vk::Extent2D chooseSwapExtent(const vk::SurfaceCapabilitiesKHR &capability);
 
     void createSwapChain();
 
@@ -147,7 +153,7 @@ private:
 
     void createGraphicsPipeline();
 
-    vk::ShaderModule createShaderModule(const std::vector<char>& code);
+    vk::ShaderModule createShaderModule(const std::vector<char> &code);
 
     void createRenderPass();
 
@@ -157,9 +163,9 @@ private:
 
     void createCommandPool();
 
-    void createCommandBuffer();
+    void createCommandBuffers();
 
-    void recordCommandBuffer(uint32_t imageIndex);
+    void recordCommandBuffer(const vk::CommandBuffer &commandBuffer, uint32_t imageIndex);
 
     void drawFrame();
 

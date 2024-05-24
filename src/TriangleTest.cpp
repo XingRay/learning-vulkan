@@ -63,7 +63,7 @@ void TriangleTest::initVulkan() {
     createGraphicsPipeline();
     createFrameBuffers();
     createCommandPool();
-    createCommandBuffer();
+    createCommandBuffers();
     createSyncObjects();
 }
 
@@ -869,25 +869,26 @@ void TriangleTest::createCommandPool() {
     mCommandPool = mDevice.createCommandPool(commandPoolCreateInfo);
 }
 
-void TriangleTest::createCommandBuffer() {
+void TriangleTest::createCommandBuffers() {
     vk::CommandBufferAllocateInfo commandBufferAllocateInfo;
     commandBufferAllocateInfo.sType = vk::StructureType::eCommandBufferAllocateInfo;
     commandBufferAllocateInfo.setCommandPool(mCommandPool);
     commandBufferAllocateInfo.setLevel(vk::CommandBufferLevel::ePrimary);
-    // 只创建一个命令缓冲区
-    commandBufferAllocateInfo.setCommandBufferCount(1);
+
+    commandBufferAllocateInfo.setCommandBufferCount(MAX_FRAMES_IN_FLIGHT);
+
 
     // 返回 vector<CommandBuffer>, 取 [0]
-    mCommandBuffer = mDevice.allocateCommandBuffers(commandBufferAllocateInfo)[0];
+    mCommandBuffers = mDevice.allocateCommandBuffers(commandBufferAllocateInfo);
     // mCommandBuffer 当 CommandPool 被销毁时会自动销毁, 不需要手动销毁
 }
 
-void TriangleTest::recordCommandBuffer(uint32_t imageIndex) {
+void TriangleTest::recordCommandBuffer(const vk::CommandBuffer &commandBuffer, uint32_t imageIndex) {
     vk::CommandBufferBeginInfo commandBufferBeginInfo;
     commandBufferBeginInfo.sType = vk::StructureType::eCommandBufferBeginInfo;
 //    commandBufferBeginInfo.setFlags(vk::CommandBufferUsageFlagBits::eOneTimeSubmit);
 //    commandBufferBeginInfo.setPInheritanceInfo(nullptr);
-    mCommandBuffer.begin(commandBufferBeginInfo);
+    commandBuffer.begin(commandBufferBeginInfo);
 
     vk::RenderPassBeginInfo renderPassBeginInfo{};
     renderPassBeginInfo.sType = vk::StructureType::eRenderPassBeginInfo;
@@ -900,9 +901,9 @@ void TriangleTest::recordCommandBuffer(uint32_t imageIndex) {
     renderPassBeginInfo.setClearValueCount(1);
     renderPassBeginInfo.setPClearValues(&clearValue);
 
-    mCommandBuffer.beginRenderPass(&renderPassBeginInfo, vk::SubpassContents::eInline);
+    commandBuffer.beginRenderPass(&renderPassBeginInfo, vk::SubpassContents::eInline);
     {
-        mCommandBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics, mGraphicsPipeline);
+        commandBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics, mGraphicsPipeline);
 
         vk::Viewport viewport;
         viewport.x = 0.0f;
@@ -911,59 +912,59 @@ void TriangleTest::recordCommandBuffer(uint32_t imageIndex) {
         viewport.height = (float) mSwapChainExtent.height;
         viewport.minDepth = 0.0f;
         viewport.maxDepth = 1.0f;
-        mCommandBuffer.setViewport(0, 1, &viewport);
+        commandBuffer.setViewport(0, 1, &viewport);
 
         vk::Rect2D scissor{};
         scissor.offset = vk::Offset2D{0, 0};
         scissor.extent = mSwapChainExtent;
-        mCommandBuffer.setScissor(0, 1, &scissor);
+        commandBuffer.setScissor(0, 1, &scissor);
 
         // vertexCount：即使我们没有顶点缓冲区，从技术上讲我们仍然有 3 个顶点要绘制。
         // instanceCount：用于实例渲染，1如果您不这样做，请使用。
         // firstVertex：用作顶点缓冲区的偏移量，定义 的最小值gl_VertexIndex。
         // firstInstance：用作实例渲染的偏移量，定义 的最小值gl_InstanceIndex。
-        mCommandBuffer.draw(3, 1, 0, 0);
+        commandBuffer.draw(3, 1, 0, 0);
     }
-    mCommandBuffer.endRenderPass();
-    mCommandBuffer.end();
+    commandBuffer.endRenderPass();
+    commandBuffer.end();
 }
 
 
 void TriangleTest::drawFrame() {
-    vk::Result result = mDevice.waitForFences(1, &mInFlightFence, vk::True, std::numeric_limits<uint64_t>::max());
+    vk::Result result = mDevice.waitForFences(1, &mInFlightFences[mCurrentFrame], vk::True, std::numeric_limits<uint64_t>::max());
     if (result != vk::Result::eSuccess) {
         throw std::runtime_error("waitForFences failed");
     }
-    result = mDevice.resetFences(1, &mInFlightFence);
+    result = mDevice.resetFences(1, &mInFlightFences[mCurrentFrame]);
     if (result != vk::Result::eSuccess) {
         throw std::runtime_error("resetFences failed");
     }
 
-    auto acquireResult = mDevice.acquireNextImageKHR(mSwapChain, std::numeric_limits<uint64_t>::max(), mImageAvailableSemaphore);
+    auto acquireResult = mDevice.acquireNextImageKHR(mSwapChain, std::numeric_limits<uint64_t>::max(), mImageAvailableSemaphores[mCurrentFrame]);
     if (acquireResult.result != vk::Result::eSuccess) {
         throw std::runtime_error("acquireNextImageKHR failed");
     }
     uint32_t imageIndex = acquireResult.value;
 
-    mCommandBuffer.reset();
-    recordCommandBuffer(imageIndex);
+    mCommandBuffers[mCurrentFrame].reset();
+    recordCommandBuffer(mCommandBuffers[mCurrentFrame], imageIndex);
 
     vk::SubmitInfo submitInfo{};
     submitInfo.sType = vk::StructureType::eSubmitInfo;
 
-    vk::Semaphore waitSemaphores[] = {mImageAvailableSemaphore};
+    vk::Semaphore waitSemaphores[] = {mImageAvailableSemaphores[mCurrentFrame]};
     vk::PipelineStageFlags waitStages[] = {vk::PipelineStageFlagBits::eColorAttachmentOutput};
     submitInfo.setWaitSemaphoreCount(1);
     submitInfo.setPWaitSemaphores(waitSemaphores);
     submitInfo.setPWaitDstStageMask(waitStages);
     submitInfo.setCommandBufferCount(1);
-    submitInfo.setPCommandBuffers(&mCommandBuffer);
+    submitInfo.setPCommandBuffers(&mCommandBuffers[mCurrentFrame]);
 
-    vk::Semaphore signalSemaphores[] = {mRenderFinishedSemaphore};
+    vk::Semaphore signalSemaphores[] = {mRenderFinishedSemaphores[mCurrentFrame]};
     submitInfo.setSignalSemaphoreCount(1);
     submitInfo.setPSignalSemaphores(signalSemaphores);
 
-    result = mGraphicQueue.submit(1, &submitInfo, mInFlightFence);
+    result = mGraphicQueue.submit(1, &submitInfo, mInFlightFences[mCurrentFrame]);
     if (result != vk::Result::eSuccess) {
         throw std::runtime_error("graphicQueue.submit failed");
     }
@@ -978,6 +979,8 @@ void TriangleTest::drawFrame() {
     if (result != vk::Result::eSuccess) {
         throw std::runtime_error("presentKHR failed");
     }
+
+    mCurrentFrame = (mCurrentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
 }
 
 void TriangleTest::cleanFrameBuffers() {
@@ -995,15 +998,22 @@ void TriangleTest::createSyncObjects() {
     // 已发出信号的状态下创建栅栏，以便第一次调用 vkWaitForFences()立即返回
     fenceCreateInfo.flags = vk::FenceCreateFlagBits::eSignaled;
 
-    mImageAvailableSemaphore = mDevice.createSemaphore(semaphoreCreateInfo);
-    mRenderFinishedSemaphore = mDevice.createSemaphore(semaphoreCreateInfo);
-    mInFlightFence = mDevice.createFence(fenceCreateInfo);
+    mImageAvailableSemaphores.resize(MAX_FRAMES_IN_FLIGHT);
+    mRenderFinishedSemaphores.resize(MAX_FRAMES_IN_FLIGHT);
+    mInFlightFences.resize(MAX_FRAMES_IN_FLIGHT);
+    for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+        mImageAvailableSemaphores[i] = mDevice.createSemaphore(semaphoreCreateInfo);
+        mRenderFinishedSemaphores[i] = mDevice.createSemaphore(semaphoreCreateInfo);
+        mInFlightFences[i] = mDevice.createFence(fenceCreateInfo);
+    }
 }
 
 void TriangleTest::cleanSyncObjects() {
-    mDevice.destroy(mImageAvailableSemaphore);
-    mDevice.destroy(mRenderFinishedSemaphore);
-    mDevice.destroy(mInFlightFence);
+    for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+        mDevice.destroy(mImageAvailableSemaphores[i]);
+        mDevice.destroy(mRenderFinishedSemaphores[i]);
+        mDevice.destroy(mInFlightFences[i]);
+    }
 }
 
 
