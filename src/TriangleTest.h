@@ -96,6 +96,8 @@ private:
 
     uint32_t mCurrentFrame = 0;
 
+    bool mFrameBufferResized = false;
+
 public:
     TriangleTest();
 
@@ -172,6 +174,10 @@ private:
     void createSyncObjects();
 
     void cleanSyncObjects();
+
+    void recreateSwapChain();
+
+    void cleanUpSwapChain();
 };
 
 

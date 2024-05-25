@@ -43,12 +43,19 @@ void TriangleTest::initWindow() {
     // we need to tell it to not create an OpenGL context with a subsequent call:
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
     // Because handling resized windows takes special care that we'll look into later, disable it for now
-    glfwWindowHint(GLFW_RESIZABLE, GLFW_FALSE);
+    glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
 
     // The first three parameters specify the width, height and title of the mWindow.
     // The fourth parameter allows you to optionally specify a monitor to open the mWindow on
     // and the last parameter is only relevant to OpenGL.
     mWindow = glfwCreateWindow(mWidth, mHeight, "triangle test", nullptr, nullptr);
+    // 将 this 指针保存到window对象中， 这样可以在callback中取出， 这里使用 lambda， 可以不需要
+    glfwSetWindowUserPointer(mWindow, this);
+    glfwSetFramebufferSizeCallback(mWindow, [](GLFWwindow *window, int width, int height) {
+        auto app = reinterpret_cast<TriangleTest *>(glfwGetWindowUserPointer(window));
+        std::cout << "app->mFrameBufferResized, width:" << width << " height:" << height << std::endl;
+        app->mFrameBufferResized = true;
+    });
 }
 
 void TriangleTest::initVulkan() {
@@ -78,21 +85,22 @@ void TriangleTest::mainLoop() {
 }
 
 void TriangleTest::cleanUp() {
+    cleanUpSwapChain();
+
+    mDevice.destroy(mGraphicsPipeline);
+    mDevice.destroy(mPipelineLayout);
+
+    mDevice.destroy(mRenderPass);
 
     cleanSyncObjects();
     mDevice.destroy(mCommandPool);
-    cleanFrameBuffers();
-    mDevice.destroy(mGraphicsPipeline);
-    mDevice.destroy(mPipelineLayout);
-    mDevice.destroy(mRenderPass);
-    cleanImageViews();
-    mDevice.destroy(mSwapChain);
+
     mDevice.destroy();
 
-    mInstance.destroy(mSurface);
     if (mEnableValidationLayer) {
         destroyDebugUtilsMessengerExt(nullptr);
     }
+    mInstance.destroy(mSurface);
     mInstance.destroy();
 
     glfwDestroyWindow(mWindow);
@@ -935,16 +943,21 @@ void TriangleTest::drawFrame() {
     if (result != vk::Result::eSuccess) {
         throw std::runtime_error("waitForFences failed");
     }
-    result = mDevice.resetFences(1, &mInFlightFences[mCurrentFrame]);
-    if (result != vk::Result::eSuccess) {
-        throw std::runtime_error("resetFences failed");
-    }
 
-    auto acquireResult = mDevice.acquireNextImageKHR(mSwapChain, std::numeric_limits<uint64_t>::max(), mImageAvailableSemaphores[mCurrentFrame]);
-    if (acquireResult.result != vk::Result::eSuccess) {
+    std::cout << "acquireNextImageKHR" << std::endl;
+    auto [acquireResult, imageIndex] = mDevice.acquireNextImageKHR(mSwapChain, std::numeric_limits<uint64_t>::max(), mImageAvailableSemaphores[mCurrentFrame]);
+    std::cout << "acquireNextImageKHR, acquireResult:" << acquireResult << " imageIndex:" << imageIndex << std::endl;
+    // VK_ERROR_OUT_OF_DATE_KHR：交换链已与表面不兼容，不能再用于渲染。通常在窗口大小调整后发生。
+    // VK_SUBOPTIMAL_KHR：交换链仍然可以成功显示到表面，但表面属性不再完全匹配。
+    if (acquireResult == vk::Result::eErrorOutOfDateKHR) {
+        std::cout << "acquireNextImageKHR: eErrorOutOfDateKHR, recreateSwapChain" << std::endl;
+        recreateSwapChain();
+        return;
+    } else if (acquireResult != vk::Result::eSuccess && acquireResult != vk::Result::eSuboptimalKHR) {
+        std::cout << "acquireNextImageKHR: failed" << acquireResult << std::endl;
         throw std::runtime_error("acquireNextImageKHR failed");
     }
-    uint32_t imageIndex = acquireResult.value;
+    std::cout << "acquireNextImageKHR eSuccess" << std::endl;
 
     mCommandBuffers[mCurrentFrame].reset();
     recordCommandBuffer(mCommandBuffers[mCurrentFrame], imageIndex);
@@ -964,6 +977,11 @@ void TriangleTest::drawFrame() {
     submitInfo.setSignalSemaphoreCount(1);
     submitInfo.setPSignalSemaphores(signalSemaphores);
 
+    // 仅在我们提交工作时重置栅栏
+    result = mDevice.resetFences(1, &mInFlightFences[mCurrentFrame]);
+    if (result != vk::Result::eSuccess) {
+        throw std::runtime_error("resetFences failed");
+    }
     result = mGraphicQueue.submit(1, &submitInfo, mInFlightFences[mCurrentFrame]);
     if (result != vk::Result::eSuccess) {
         throw std::runtime_error("graphicQueue.submit failed");
@@ -972,13 +990,31 @@ void TriangleTest::drawFrame() {
     vk::PresentInfoKHR presentInfo{};
     presentInfo.sType = vk::StructureType::ePresentInfoKHR;
     presentInfo.setWaitSemaphores(signalSemaphores);
-    presentInfo.setSwapchains(mSwapChain);
+    presentInfo.setSwapchainCount(1);
+    presentInfo.setPSwapchains(&mSwapChain);
     presentInfo.setImageIndices(imageIndex);
 
-    result = mPresentQueue.presentKHR(presentInfo);
-    if (result != vk::Result::eSuccess) {
+    std::cout << "presentKHR, mFrameBufferResized:" << mFrameBufferResized << std::endl;
+
+    // https://github.com/KhronosGroup/Vulkan-Hpp/issues/599
+    // 当出现图片不匹配时， cpp风格的 presentKHR 会抛出异常， 而不是返回 result， 而C风格的 presentKHR 接口会返回 result
+    try{
+        result = mPresentQueue.presentKHR(presentInfo);
+    }catch (const vk::OutOfDateKHRError& e){
+        std::cout<<"mPresentQueue.presentKHR => OutOfDateKHRError"<<std::endl;
+        result = vk::Result::eErrorOutOfDateKHR;
+    }
+
+    std::cout << "presentKHR result:" << result << std::endl;
+    if (result == vk::Result::eErrorOutOfDateKHR || result == vk::Result::eSuboptimalKHR || mFrameBufferResized) {
+        mFrameBufferResized = false;
+        std::cout << "presentKHR: eErrorOutOfDateKHR or eSuboptimalKHR or mFrameBufferResized, recreateSwapChain" << std::endl;
+        recreateSwapChain();
+        return;
+    } else if (result != vk::Result::eSuccess) {
         throw std::runtime_error("presentKHR failed");
     }
+    std::cout << "presentKHR eSuccess" << std::endl;
 
     mCurrentFrame = (mCurrentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
 }
@@ -1014,6 +1050,38 @@ void TriangleTest::cleanSyncObjects() {
         mDevice.destroy(mRenderFinishedSemaphores[i]);
         mDevice.destroy(mInFlightFences[i]);
     }
+}
+
+void TriangleTest::recreateSwapChain() {
+
+    // 处理最小化
+    int width;
+    int height;
+    glfwGetFramebufferSize(mWindow, &width, &height);
+    while (width == 0 || height == 0) {
+        glfwGetFramebufferSize(mWindow, &width, &height);
+        glfwWaitEvents();
+    }
+
+    mDevice.waitIdle();
+
+    cleanUpSwapChain();
+
+    createSwapChain();
+    createImageViews();
+    createFrameBuffers();
+}
+
+void TriangleTest::cleanUpSwapChain() {
+    for (const auto &swapChainFrameBuffer: mSwapChainFrameBuffers) {
+        mDevice.destroy(swapChainFrameBuffer);
+    }
+
+    for (const auto &swapChainImageView: mSwapChainImageViews) {
+        mDevice.destroy(swapChainImageView);
+    }
+
+    mDevice.destroy(mSwapChain);
 }
 
 
