@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <limits>
 #include <algorithm>
+#include <glm/glm.hpp>
 
 // That way GLFW will include its own definitions and automatically load the Vulkan header with it.
 #define GLFW_INCLUDE_VULKAN
@@ -17,6 +18,46 @@
 #include "QueueFamilyIndices.h"
 #include "SwapChainSupportDetail.h"
 
+struct Vertex {
+    // 位置
+    glm::vec2 pos;
+
+    // 颜色
+    glm::vec3 color;
+
+    static vk::VertexInputBindingDescription getBindingDescription() {
+        vk::VertexInputBindingDescription description;
+
+        // 绑定描述
+        description.binding = 0;
+
+        // 步幅，表示每个顶点数据的字节数
+        description.stride = sizeof(Vertex);
+
+        // 输入速率，表示每个顶点数据的读取频率
+        description.inputRate = vk::VertexInputRate::eVertex;
+
+        return description;
+    }
+
+    static std::array<vk::VertexInputAttributeDescription, 2> getAttributeDescriptions() {
+        std::array<vk::VertexInputAttributeDescription, 2> attributeDescriptions{};
+
+        // 位置
+        attributeDescriptions[0].binding = 0;
+        attributeDescriptions[0].location = 0;
+        attributeDescriptions[0].format = vk::Format::eR32G32Sfloat;
+        attributeDescriptions[0].offset = offsetof(Vertex, pos);
+
+        // 颜色
+        attributeDescriptions[1].binding = 0;
+        attributeDescriptions[1].location = 1;
+        attributeDescriptions[1].format = vk::Format::eR32G32B32Sfloat;
+        attributeDescriptions[1].offset = offsetof(Vertex, color);
+
+        return attributeDescriptions;
+    }
+};
 
 class TriangleTest {
 public:
@@ -98,6 +139,16 @@ private:
 
     bool mFrameBufferResized = false;
 
+    const std::vector<Vertex> mVertices = {
+            {{0.0f, -0.5f}, {1.0f, 1.0f, 1.0f}},
+            {{0.5f, 0.5f}, {0.0f, 1.0f, 0.0f}},
+            {{-0.5f, 0.5f}, {0.0f, 0.0f, 1.0f}}
+    };
+
+    vk::Buffer mVertexBuffer;
+
+    vk::DeviceMemory mVertexBufferMemory;
+
 public:
     TriangleTest();
 
@@ -178,6 +229,10 @@ private:
     void recreateSwapChain();
 
     void cleanUpSwapChain();
+
+    void createVertexBuffer();
+
+    uint32_t findMemoryType(uint32_t typeFilter, vk::MemoryPropertyFlags properties);
 };
 
 

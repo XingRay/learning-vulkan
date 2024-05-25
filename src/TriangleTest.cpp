@@ -70,6 +70,7 @@ void TriangleTest::initVulkan() {
     createGraphicsPipeline();
     createFrameBuffers();
     createCommandPool();
+    createVertexBuffer();
     createCommandBuffers();
     createSyncObjects();
 }
@@ -86,6 +87,9 @@ void TriangleTest::mainLoop() {
 
 void TriangleTest::cleanUp() {
     cleanUpSwapChain();
+
+    mDevice.destroy(mVertexBuffer);
+    mDevice.free(mVertexBufferMemory);
 
     mDevice.destroy(mGraphicsPipeline);
     mDevice.destroy(mPipelineLayout);
@@ -636,8 +640,8 @@ void TriangleTest::createRenderPass() {
 }
 
 void TriangleTest::createGraphicsPipeline() {
-    auto vertexShaderCode = FileUtil::readFile("shader/vertex.spv");
-    auto fragmentShaderCode = FileUtil::readFile("shader/fragment.spv");
+    auto vertexShaderCode = FileUtil::readFile("../output/shader/vertex.spv");
+    auto fragmentShaderCode = FileUtil::readFile("../output/shader/fragment.spv");
 
     vk::ShaderModule vertexModule = createShaderModule(vertexShaderCode);
     vk::ShaderModule fragmentModule = createShaderModule(fragmentShaderCode);
@@ -678,12 +682,14 @@ void TriangleTest::createGraphicsPipeline() {
     viewportStateCreateInfo.setPScissors(&scissor);
 
     // vertex shader
+    vk::VertexInputBindingDescription bindingDescription = Vertex::getBindingDescription();
+    std::array<vk::VertexInputAttributeDescription, 2> attributeDescriptions = Vertex::getAttributeDescriptions();
     vk::PipelineVertexInputStateCreateInfo vertexInputStateCreateInfo;
     vertexInputStateCreateInfo.sType = vk::StructureType::ePipelineVertexInputStateCreateInfo;
-    vertexInputStateCreateInfo.vertexBindingDescriptionCount = 0;
-    vertexInputStateCreateInfo.pVertexBindingDescriptions = nullptr;
-    vertexInputStateCreateInfo.vertexAttributeDescriptionCount = 0;
-    vertexInputStateCreateInfo.pVertexAttributeDescriptions = nullptr;
+    vertexInputStateCreateInfo.setPVertexBindingDescriptions(&bindingDescription);
+    vertexInputStateCreateInfo.setVertexBindingDescriptionCount(1);
+    vertexInputStateCreateInfo.setPVertexAttributeDescriptions(attributeDescriptions.data());
+    vertexInputStateCreateInfo.setVertexAttributeDescriptionCount(attributeDescriptions.size());
 
     vk::PipelineShaderStageCreateInfo vertexShaderStageCreateInfo;
     vertexShaderStageCreateInfo.sType = vk::StructureType::ePipelineShaderStageCreateInfo;
@@ -927,11 +933,14 @@ void TriangleTest::recordCommandBuffer(const vk::CommandBuffer &commandBuffer, u
         scissor.extent = mSwapChainExtent;
         commandBuffer.setScissor(0, 1, &scissor);
 
+        vk::Buffer vertexBuffers[] = {mVertexBuffer};
+        vk::DeviceSize offsets[] = {0};
+        commandBuffer.bindVertexBuffers(0, vertexBuffers, offsets);
         // vertexCount：即使我们没有顶点缓冲区，从技术上讲我们仍然有 3 个顶点要绘制。
         // instanceCount：用于实例渲染，1如果您不这样做，请使用。
         // firstVertex：用作顶点缓冲区的偏移量，定义 的最小值gl_VertexIndex。
         // firstInstance：用作实例渲染的偏移量，定义 的最小值gl_InstanceIndex。
-        commandBuffer.draw(3, 1, 0, 0);
+        commandBuffer.draw(mVertices.size(), 1, 0, 0);
     }
     commandBuffer.endRenderPass();
     commandBuffer.end();
@@ -963,7 +972,7 @@ void TriangleTest::drawFrame() {
     recordCommandBuffer(mCommandBuffers[mCurrentFrame], imageIndex);
 
     vk::SubmitInfo submitInfo{};
-    submitInfo.sType = vk::StructureType::eSubmitInfo;
+//    submitInfo.sType = vk::StructureType::eSubmitInfo;
 
     vk::Semaphore waitSemaphores[] = {mImageAvailableSemaphores[mCurrentFrame]};
     vk::PipelineStageFlags waitStages[] = {vk::PipelineStageFlagBits::eColorAttachmentOutput};
@@ -988,7 +997,7 @@ void TriangleTest::drawFrame() {
     }
 
     vk::PresentInfoKHR presentInfo{};
-    presentInfo.sType = vk::StructureType::ePresentInfoKHR;
+//    presentInfo.sType = vk::StructureType::ePresentInfoKHR;
     presentInfo.setWaitSemaphores(signalSemaphores);
     presentInfo.setSwapchainCount(1);
     presentInfo.setPSwapchains(&mSwapChain);
@@ -998,10 +1007,10 @@ void TriangleTest::drawFrame() {
 
     // https://github.com/KhronosGroup/Vulkan-Hpp/issues/599
     // 当出现图片不匹配时， cpp风格的 presentKHR 会抛出异常， 而不是返回 result， 而C风格的 presentKHR 接口会返回 result
-    try{
+    try {
         result = mPresentQueue.presentKHR(presentInfo);
-    }catch (const vk::OutOfDateKHRError& e){
-        std::cout<<"mPresentQueue.presentKHR => OutOfDateKHRError"<<std::endl;
+    } catch (const vk::OutOfDateKHRError &e) {
+        std::cout << "mPresentQueue.presentKHR => OutOfDateKHRError" << std::endl;
         result = vk::Result::eErrorOutOfDateKHR;
     }
 
@@ -1027,10 +1036,10 @@ void TriangleTest::cleanFrameBuffers() {
 
 void TriangleTest::createSyncObjects() {
     vk::SemaphoreCreateInfo semaphoreCreateInfo;
-    semaphoreCreateInfo.sType = vk::StructureType::eSemaphoreCreateInfo;
+//    semaphoreCreateInfo.sType = vk::StructureType::eSemaphoreCreateInfo;
 
     vk::FenceCreateInfo fenceCreateInfo;
-    fenceCreateInfo.sType = vk::StructureType::eFenceCreateInfo;
+//    fenceCreateInfo.sType = vk::StructureType::eFenceCreateInfo;
     // 已发出信号的状态下创建栅栏，以便第一次调用 vkWaitForFences()立即返回
     fenceCreateInfo.flags = vk::FenceCreateFlagBits::eSignaled;
 
@@ -1084,6 +1093,44 @@ void TriangleTest::cleanUpSwapChain() {
     mDevice.destroy(mSwapChain);
 }
 
+void TriangleTest::createVertexBuffer() {
+    vk::BufferCreateInfo bufferCreateInfo{};
+//    bufferCreateInfo.sType = vk::StructureType::eBufferCreateInfo;
+    bufferCreateInfo.setSize(sizeof(mVertices[0]) * mVertices.size())
+            .setUsage(vk::BufferUsageFlagBits::eVertexBuffer)
+            .setSharingMode(vk::SharingMode::eExclusive);
+
+    mVertexBuffer = mDevice.createBuffer(bufferCreateInfo);
+
+    vk::MemoryRequirements memoryRequirements = mDevice.getBufferMemoryRequirements(mVertexBuffer);
+
+    vk::MemoryAllocateInfo memoryAllocateInfo{};
+//    memoryAllocateInfo.sType = vk::StructureType::eMemoryAllocateInfo;
+    memoryAllocateInfo.allocationSize = memoryRequirements.size;
+    memoryAllocateInfo.memoryTypeIndex = findMemoryType(memoryRequirements.memoryTypeBits,
+                                                        vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
+
+    mVertexBufferMemory = mDevice.allocateMemory(memoryAllocateInfo);
+    mDevice.bindBufferMemory(mVertexBuffer, mVertexBufferMemory, 0);
+
+    void *data = mDevice.mapMemory(mVertexBufferMemory, 0, bufferCreateInfo.size, vk::MemoryMapFlagBits::ePlacedEXT);
+    {
+        memcpy(data, mVertices.data(), (size_t) bufferCreateInfo.size);
+    }
+    mDevice.unmapMemory(mVertexBufferMemory);
+}
+
+uint32_t TriangleTest::findMemoryType(uint32_t typeFilter, vk::MemoryPropertyFlags properties) {
+    vk::PhysicalDeviceMemoryProperties memoryProperties = mPhysicalDevice.getMemoryProperties();
+
+    for (int i = 0; i < memoryProperties.memoryTypeCount; i++) {
+        if (typeFilter & (1 << i) && ((memoryProperties.memoryTypes[i].propertyFlags & properties) == properties)) {
+            return i;
+        }
+    }
+
+    throw std::runtime_error("failed to find suitable memory type !");
+}
 
 vk::Result CreateDebugUtilsMessengerEXT(vk::Instance instance,
                                         const vk::DebugUtilsMessengerCreateInfoEXT *pCreateInfo,
