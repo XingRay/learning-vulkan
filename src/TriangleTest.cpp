@@ -71,6 +71,7 @@ void TriangleTest::initVulkan() {
     createFrameBuffers();
     createCommandPool();
     createVertexBuffer();
+    createIndexBuffer();
     createCommandBuffers();
     createSyncObjects();
 }
@@ -90,6 +91,9 @@ void TriangleTest::cleanUp() {
 
     mDevice.destroy(mVertexBuffer);
     mDevice.free(mVertexBufferMemory);
+
+    mDevice.destroy(mIndexBuffer);
+    mDevice.free(mIndexBufferMemory);
 
     mDevice.destroy(mGraphicsPipeline);
     mDevice.destroy(mPipelineLayout);
@@ -864,9 +868,7 @@ void TriangleTest::createCommandBuffers() {
     vk::CommandBufferAllocateInfo commandBufferAllocateInfo;
     commandBufferAllocateInfo.setCommandPool(mCommandPool);
     commandBufferAllocateInfo.setLevel(vk::CommandBufferLevel::ePrimary);
-
     commandBufferAllocateInfo.setCommandBufferCount(MAX_FRAMES_IN_FLIGHT);
-
 
     // 返回 vector<CommandBuffer>, 取 [0]
     mCommandBuffers = mDevice.allocateCommandBuffers(commandBufferAllocateInfo);
@@ -910,11 +912,16 @@ void TriangleTest::recordCommandBuffer(const vk::CommandBuffer &commandBuffer, u
         vk::Buffer vertexBuffers[] = {mVertexBuffer};
         vk::DeviceSize offsets[] = {0};
         commandBuffer.bindVertexBuffers(0, vertexBuffers, offsets);
+
+        commandBuffer.bindIndexBuffer(mIndexBuffer, 0, vk::IndexType::eUint16);
+
         // vertexCount：即使我们没有顶点缓冲区，从技术上讲我们仍然有 3 个顶点要绘制。
         // instanceCount：用于实例渲染，1如果您不这样做，请使用。
         // firstVertex：用作顶点缓冲区的偏移量，定义 的最小值gl_VertexIndex。
         // firstInstance：用作实例渲染的偏移量，定义 的最小值gl_InstanceIndex。
-        commandBuffer.draw(mVertices.size(), 1, 0, 0);
+//        commandBuffer.draw(mVertices.size(), 1, 0, 0);
+
+        commandBuffer.drawIndexed(mIndices.size(), 1, 0, 0, 0);
     }
     commandBuffer.endRenderPass();
     commandBuffer.end();
@@ -1084,6 +1091,27 @@ void TriangleTest::createVertexBuffer() {
     mDevice.freeMemory(stagingBufferMemory);
 }
 
+void TriangleTest::createIndexBuffer() {
+    vk::DeviceSize bufferSize = sizeof(mIndices[0]) * mIndices.size();
+
+    auto [stagingBuffer, stagingBufferMemory] = createBuffer(bufferSize, vk::BufferUsageFlagBits::eTransferSrc,
+                                                             vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
+    void *data = mDevice.mapMemory(stagingBufferMemory, 0, bufferSize, static_cast<vk::MemoryMapFlags>(0)/*vk::MemoryMapFlagBits::ePlacedEXT*/);
+    {
+        memcpy(data, mIndices.data(), (size_t) bufferSize);
+    }
+    mDevice.unmapMemory(stagingBufferMemory);
+
+    std::tie(mIndexBuffer, mIndexBufferMemory) = createBuffer(bufferSize,
+                                                              vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eIndexBuffer,
+                                                              vk::MemoryPropertyFlagBits::eDeviceLocal);
+
+    copyBuffer(stagingBuffer, mIndexBuffer, bufferSize);
+
+    mDevice.destroy(stagingBuffer);
+    mDevice.freeMemory(stagingBufferMemory);
+}
+
 uint32_t TriangleTest::findMemoryType(uint32_t typeFilter, vk::MemoryPropertyFlags properties) {
     vk::PhysicalDeviceMemoryProperties memoryProperties = mPhysicalDevice.getMemoryProperties();
 
@@ -1144,6 +1172,7 @@ void TriangleTest::copyBuffer(vk::Buffer srcBuffer, vk::Buffer dstBuffer, vk::De
 
     mDevice.freeCommandBuffers(mCommandPool, commandBuffer);
 }
+
 
 vk::Result CreateDebugUtilsMessengerEXT(vk::Instance instance,
                                         const vk::DebugUtilsMessengerCreateInfoEXT *pCreateInfo,

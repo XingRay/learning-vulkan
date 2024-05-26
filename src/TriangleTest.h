@@ -140,14 +140,24 @@ private:
     bool mFrameBufferResized = false;
 
     const std::vector<Vertex> mVertices = {
-            {{0.0f, -0.5f}, {0.0f, 1.0f, 1.0f}},
-            {{0.5f, 0.5f}, {1.0f, 0.0f, 1.0f}},
-            {{-0.5f, 0.5f}, {1.0f, 1.0f, 0.0f}}
+            {{-0.5f, -0.5f}, {1.0f, 0.0f, 0.0f}},
+            {{0.5f,  -0.5f}, {0.0f, 1.0f, 0.0f}},
+            {{0.5f,  0.5f},  {0.0f, 0.0f, 1.0f}},
+            {{-0.5f, 0.5f},  {1.0f, 1.0f, 1.0f}},
+    };
+
+    const std::vector<uint16_t> mIndices = {
+            0, 1, 2,
+            2, 3, 0
     };
 
     vk::Buffer mVertexBuffer;
 
     vk::DeviceMemory mVertexBufferMemory;
+
+    vk::Buffer mIndexBuffer;
+
+    vk::DeviceMemory mIndexBufferMemory;
 
 public:
     TriangleTest();
@@ -232,11 +242,15 @@ private:
 
     void createVertexBuffer();
 
+    void createIndexBuffer();
+
     uint32_t findMemoryType(uint32_t typeFilter, vk::MemoryPropertyFlags properties);
 
-    std::pair<vk::Buffer, vk::DeviceMemory> createBuffer(vk::DeviceSize size, vk::BufferUsageFlags usage, vk::MemoryPropertyFlags  properties);
+    std::pair<vk::Buffer, vk::DeviceMemory> createBuffer(vk::DeviceSize size, vk::BufferUsageFlags usage, vk::MemoryPropertyFlags properties);
 
     void copyBuffer(vk::Buffer srcBuffer, vk::Buffer dstBuffer, vk::DeviceSize size);
+
+
 };
 
 
