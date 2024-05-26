@@ -67,11 +67,15 @@ void TriangleTest::initVulkan() {
     createSwapChain();
     createImageViews();
     createRenderPass();
+    createDescriptorSetLayout();
     createGraphicsPipeline();
     createFrameBuffers();
     createCommandPool();
     createVertexBuffer();
     createIndexBuffer();
+    createUniformBuffers();
+    createDescriptorPool();
+    createDescriptorSets();
     createCommandBuffers();
     createSyncObjects();
 }
@@ -88,6 +92,10 @@ void TriangleTest::mainLoop() {
 
 void TriangleTest::cleanUp() {
     cleanUpSwapChain();
+
+    cleanUniformBuffers();
+    mDevice.destroy(mDescriptorPool);
+    mDevice.destroy(mDescriptorSetLayout);
 
     mDevice.destroy(mVertexBuffer);
     mDevice.free(mVertexBufferMemory);
@@ -567,7 +575,7 @@ void TriangleTest::createImageViews() {
 }
 
 void TriangleTest::cleanImageViews() {
-    for (auto imageView: mSwapChainImageViews) {
+    for (const auto &imageView: mSwapChainImageViews) {
         mDevice.destroy(imageView);
     }
 }
@@ -631,7 +639,6 @@ void TriangleTest::createRenderPass() {
     renderPassCreateInfo.setDependencyCount(1);
     renderPassCreateInfo.setPDependencies(&subpassDependency);
 
-
     mRenderPass = mDevice.createRenderPass(renderPassCreateInfo);
 }
 
@@ -644,8 +651,8 @@ void TriangleTest::createGraphicsPipeline() {
 
     // input assembler
     vk::PipelineInputAssemblyStateCreateInfo inputAssemblyStateCreateInfo;
-    inputAssemblyStateCreateInfo.setTopology(vk::PrimitiveTopology::eTriangleList);
-    inputAssemblyStateCreateInfo.primitiveRestartEnable = vk::False;
+    inputAssemblyStateCreateInfo.setTopology(vk::PrimitiveTopology::eTriangleList)
+            .setPrimitiveRestartEnable(vk::False);
 
     std::vector<vk::DynamicState> dynamicStages = {
             vk::DynamicState::eViewport,
@@ -653,41 +660,41 @@ void TriangleTest::createGraphicsPipeline() {
     };
 
     vk::PipelineDynamicStateCreateInfo dynamicStateCreateInfo;
-    dynamicStateCreateInfo.dynamicStateCount = dynamicStages.size();
-    dynamicStateCreateInfo.pDynamicStates = dynamicStages.data();
+    dynamicStateCreateInfo.setDynamicStateCount(dynamicStages.size())
+            .setPDynamicStates(dynamicStages.data());
 
     vk::Viewport viewport;
-    viewport.x = 0.0f;
-    viewport.y = 0.0f;
-    viewport.width = (float) mSwapChainExtent.width;
-    viewport.height = (float) mSwapChainExtent.height;
-    viewport.minDepth = 0.0f;
-    viewport.maxDepth = 1.0f;
+    viewport.setX(0.0f)
+            .setY(0.0f)
+            .setWidth((float) mSwapChainExtent.width)
+            .setHeight((float) mSwapChainExtent.height)
+            .setMinDepth(0.0f)
+            .setMaxDepth(1.0f);
 
     vk::Rect2D scissor{};
-    scissor.offset = vk::Offset2D{0, 0};
-    scissor.extent = mSwapChainExtent;
+    scissor.setOffset(vk::Offset2D{0, 0})
+            .setExtent(mSwapChainExtent);
 
     vk::PipelineViewportStateCreateInfo viewportStateCreateInfo;
-    viewportStateCreateInfo.viewportCount = 1;
-    viewportStateCreateInfo.setPViewports(&viewport);
-    viewportStateCreateInfo.scissorCount = 1;
-    viewportStateCreateInfo.setPScissors(&scissor);
+    viewportStateCreateInfo.setViewportCount(1)
+            .setPViewports(&viewport)
+            .setScissorCount(1)
+            .setPScissors(&scissor);
 
     // vertex shader
     vk::VertexInputBindingDescription bindingDescription = Vertex::getBindingDescription();
     std::array<vk::VertexInputAttributeDescription, 2> attributeDescriptions = Vertex::getAttributeDescriptions();
     vk::PipelineVertexInputStateCreateInfo vertexInputStateCreateInfo;
-    vertexInputStateCreateInfo.setPVertexBindingDescriptions(&bindingDescription);
-    vertexInputStateCreateInfo.setVertexBindingDescriptionCount(1);
-    vertexInputStateCreateInfo.setPVertexAttributeDescriptions(attributeDescriptions.data());
-    vertexInputStateCreateInfo.setVertexAttributeDescriptionCount(attributeDescriptions.size());
+    vertexInputStateCreateInfo.setPVertexBindingDescriptions(&bindingDescription)
+            .setVertexBindingDescriptionCount(1)
+            .setPVertexAttributeDescriptions(attributeDescriptions.data())
+            .setVertexAttributeDescriptionCount(attributeDescriptions.size());
 
     vk::PipelineShaderStageCreateInfo vertexShaderStageCreateInfo;
-    vertexShaderStageCreateInfo.setStage(vk::ShaderStageFlagBits::eVertex);
-    vertexShaderStageCreateInfo.setModule(vertexModule);
-    vertexShaderStageCreateInfo.setPName("main");
-    vertexShaderStageCreateInfo.setPSpecializationInfo(nullptr);
+    vertexShaderStageCreateInfo.setStage(vk::ShaderStageFlagBits::eVertex)
+            .setModule(vertexModule)
+            .setPName("main")
+            .setPSpecializationInfo(nullptr);
 
     // tessellation
 
@@ -697,49 +704,43 @@ void TriangleTest::createGraphicsPipeline() {
     vk::PipelineRasterizationStateCreateInfo rasterizationStateCreateInfo;
 
     // 如果depthClampEnable设置为VK_TRUE，则超出近平面和远平面的片段将被夹紧，而不是丢弃它们。这在某些特殊情况下很有用，例如阴影贴图。使用此功能需要启用 GPU 功能。
-    rasterizationStateCreateInfo.setDepthClampEnable(vk::False);
-
-    // 如果rasterizerDiscardEnable设置为VK_TRUE，则几何图形永远不会通过光栅化阶段。这基本上禁用了帧缓冲区的任何输出。
-    rasterizationStateCreateInfo.setRasterizerDiscardEnable(vk::False);
-
-    //确定polygonMode如何为几何体生成片段。可以使用以下模式：
-    //
-    //VK_POLYGON_MODE_FILL：用碎片填充多边形区域
-    //VK_POLYGON_MODE_LINE：多边形边缘绘制为线
-    //VK_POLYGON_MODE_POINT：多边形顶点绘制为点
-    rasterizationStateCreateInfo.setPolygonMode(vk::PolygonMode::eFill);
-    // 使用填充以外的任何模式都需要设置 lineWidth :
-    rasterizationStateCreateInfo.setLineWidth(1.0f);
-    // 设置面剔除策略, 这里设置为反面被剔除
-    rasterizationStateCreateInfo.setCullMode(vk::CullModeFlagBits::eBack);
-    // 设置正面的方向, 这设置为顺时针为正面
-    rasterizationStateCreateInfo.setFrontFace(vk::FrontFace::eClockwise);
-
-    rasterizationStateCreateInfo.setDepthBiasEnable(vk::False);
-    rasterizationStateCreateInfo.setDepthBiasConstantFactor(0.0f);
-    rasterizationStateCreateInfo.setDepthBiasClamp(0.0f);
-    rasterizationStateCreateInfo.setDepthBiasSlopeFactor(0.0f);
+    rasterizationStateCreateInfo.setDepthClampEnable(vk::False)
+                    // 如果rasterizerDiscardEnable设置为VK_TRUE，则几何图形永远不会通过光栅化阶段。这基本上禁用了帧缓冲区的任何输出。
+            .setRasterizerDiscardEnable(vk::False)
+                    //确定polygonMode如何为几何体生成片段。可以使用以下模式：
+                    //VK_POLYGON_MODE_FILL：用碎片填充多边形区域
+                    //VK_POLYGON_MODE_LINE：多边形边缘绘制为线
+                    //VK_POLYGON_MODE_POINT：多边形顶点绘制为点
+            .setPolygonMode(vk::PolygonMode::eFill)
+                    // 使用填充以外的任何模式都需要设置 lineWidth :
+            .setLineWidth(1.0f)
+                    // 设置面剔除策略, 这里设置为反面被剔除
+            .setCullMode(vk::CullModeFlagBits::eBack)
+                    // 设置正面的方向, 这设置为顺时针为正面
+            .setFrontFace(vk::FrontFace::eCounterClockwise)
+            .setDepthBiasEnable(vk::False)
+            .setDepthBiasConstantFactor(0.0f)
+            .setDepthBiasClamp(0.0f)
+            .setDepthBiasSlopeFactor(0.0f);
 
     // depth & stencil testing
     vk::PipelineDepthStencilStateCreateInfo depthStencilStateCreateInfo;
 
-
-
     // Multisampling
     vk::PipelineMultisampleStateCreateInfo multisampleStateCreateInfo;
-    multisampleStateCreateInfo.setSampleShadingEnable(vk::False);
-    multisampleStateCreateInfo.setRasterizationSamples(vk::SampleCountFlagBits::e1);
-    multisampleStateCreateInfo.setMinSampleShading(1.0f);
-    multisampleStateCreateInfo.setPSampleMask(nullptr);
-    multisampleStateCreateInfo.setAlphaToCoverageEnable(vk::False);
-    multisampleStateCreateInfo.setAlphaToOneEnable(vk::False);
+    multisampleStateCreateInfo.setSampleShadingEnable(vk::False)
+            .setRasterizationSamples(vk::SampleCountFlagBits::e1)
+            .setMinSampleShading(1.0f)
+            .setPSampleMask(nullptr)
+            .setAlphaToCoverageEnable(vk::False)
+            .setAlphaToOneEnable(vk::False);
 
     // fragment shader
     vk::PipelineShaderStageCreateInfo fragmentShaderStageCreateInfo;
-    fragmentShaderStageCreateInfo.setStage(vk::ShaderStageFlagBits::eFragment);
-    fragmentShaderStageCreateInfo.setModule(fragmentModule);
-    fragmentShaderStageCreateInfo.setPName("main");
-    fragmentShaderStageCreateInfo.setPSpecializationInfo(nullptr);
+    fragmentShaderStageCreateInfo.setStage(vk::ShaderStageFlagBits::eFragment)
+            .setModule(fragmentModule)
+            .setPName("main")
+            .setPSpecializationInfo(nullptr);
 
     // color blending
     vk::PipelineColorBlendAttachmentState colorBlendAttachmentState{};
@@ -772,55 +773,53 @@ void TriangleTest::createGraphicsPipeline() {
     // 常用的混合模式是透明混合
     // finalColor.rgb = newAlpha * newColor + (1 - newAlpha) * oldColor;
     // finalColor.a = newAlpha.a;
-    colorBlendAttachmentState.setBlendEnable(vk::True);
-
-    colorBlendAttachmentState.setSrcColorBlendFactor(vk::BlendFactor::eSrcAlpha);
-    colorBlendAttachmentState.setDstColorBlendFactor(vk::BlendFactor::eOneMinusSrcAlpha);
-    colorBlendAttachmentState.setColorBlendOp(vk::BlendOp::eAdd);
-
-    colorBlendAttachmentState.setSrcAlphaBlendFactor(vk::BlendFactor::eOne);
-    colorBlendAttachmentState.setDstAlphaBlendFactor(vk::BlendFactor::eZero);
-    colorBlendAttachmentState.setAlphaBlendOp(vk::BlendOp::eAdd);
+    colorBlendAttachmentState.setBlendEnable(vk::True)
+            .setSrcColorBlendFactor(vk::BlendFactor::eSrcAlpha)
+            .setDstColorBlendFactor(vk::BlendFactor::eOneMinusSrcAlpha)
+            .setColorBlendOp(vk::BlendOp::eAdd)
+            .setSrcAlphaBlendFactor(vk::BlendFactor::eOne)
+            .setDstAlphaBlendFactor(vk::BlendFactor::eZero)
+            .setAlphaBlendOp(vk::BlendOp::eAdd);
 
     vk::PipelineColorBlendStateCreateInfo colorBlendStateCreateInfo;
-    colorBlendStateCreateInfo.logicOpEnable = vk::False;
-    colorBlendStateCreateInfo.logicOp = vk::LogicOp::eCopy;
-    colorBlendStateCreateInfo.attachmentCount = 1;
-    colorBlendStateCreateInfo.setPAttachments(&colorBlendAttachmentState);
-    colorBlendStateCreateInfo.setBlendConstants(std::array<float, 4>{0.0f, 0.0f, 0.0f, 0.0f});
+    colorBlendStateCreateInfo.setLogicOpEnable(vk::False)
+            .setLogicOp(vk::LogicOp::eCopy)
+            .setAttachmentCount(1)
+            .setPAttachments(&colorBlendAttachmentState)
+            .setBlendConstants(std::array<float, 4>{0.0f, 0.0f, 0.0f, 0.0f});
 
-    vk::PipelineShaderStageCreateInfo shaderStageCreateInfos[] = {vertexShaderStageCreateInfo, fragmentShaderStageCreateInfo};
 
-    vk::PipelineLayoutCreateInfo pipelineLayoutCreateInfo;
-    pipelineLayoutCreateInfo.setSetLayoutCount(0);
-    pipelineLayoutCreateInfo.setPSetLayouts(nullptr);
-    pipelineLayoutCreateInfo.setPushConstantRangeCount(0);
-    pipelineLayoutCreateInfo.setPPushConstantRanges(nullptr);
+    vk::PipelineLayoutCreateInfo pipelineLayoutCreateInfo{};
+    pipelineLayoutCreateInfo.setSetLayoutCount(1)
+            .setPSetLayouts(&mDescriptorSetLayout)
+            .setPushConstantRangeCount(0)
+            .setPPushConstantRanges(nullptr);
 
     mPipelineLayout = mDevice.createPipelineLayout(pipelineLayoutCreateInfo);
 
+    vk::PipelineShaderStageCreateInfo shaderStageCreateInfos[] = {vertexShaderStageCreateInfo, fragmentShaderStageCreateInfo};
     vk::GraphicsPipelineCreateInfo graphicsPipelineCreateInfo;
-    graphicsPipelineCreateInfo.setStageCount(2);
-    graphicsPipelineCreateInfo.setPStages(shaderStageCreateInfos);
-    graphicsPipelineCreateInfo.setPVertexInputState(&vertexInputStateCreateInfo);
-    graphicsPipelineCreateInfo.setPInputAssemblyState(&inputAssemblyStateCreateInfo);
-    graphicsPipelineCreateInfo.setPViewportState(&viewportStateCreateInfo);
-    graphicsPipelineCreateInfo.setPRasterizationState(&rasterizationStateCreateInfo);
-    graphicsPipelineCreateInfo.setPMultisampleState(&multisampleStateCreateInfo);
-    graphicsPipelineCreateInfo.setPDepthStencilState(&depthStencilStateCreateInfo);
-    graphicsPipelineCreateInfo.setPColorBlendState(&colorBlendStateCreateInfo);
-    graphicsPipelineCreateInfo.setPDynamicState(&dynamicStateCreateInfo);
-    graphicsPipelineCreateInfo.setLayout(mPipelineLayout);
-    graphicsPipelineCreateInfo.setRenderPass(mRenderPass);
-    graphicsPipelineCreateInfo.setSubpass(0);
-    graphicsPipelineCreateInfo.setBasePipelineHandle(VK_NULL_HANDLE);
-    graphicsPipelineCreateInfo.setBasePipelineIndex(-1);
+    graphicsPipelineCreateInfo.setStageCount(2)
+            .setPStages(shaderStageCreateInfos)
+            .setPVertexInputState(&vertexInputStateCreateInfo)
+            .setPInputAssemblyState(&inputAssemblyStateCreateInfo)
+            .setPViewportState(&viewportStateCreateInfo)
+            .setPRasterizationState(&rasterizationStateCreateInfo)
+            .setPMultisampleState(&multisampleStateCreateInfo)
+            .setPDepthStencilState(&depthStencilStateCreateInfo)
+            .setPColorBlendState(&colorBlendStateCreateInfo)
+            .setPDynamicState(&dynamicStateCreateInfo)
+            .setLayout(mPipelineLayout)
+            .setRenderPass(mRenderPass)
+            .setSubpass(0)
+            .setBasePipelineHandle(VK_NULL_HANDLE)
+            .setBasePipelineIndex(-1);
 
-    auto pipelineCreateResult = mDevice.createGraphicsPipeline(VK_NULL_HANDLE, graphicsPipelineCreateInfo);
-    if (pipelineCreateResult.result != vk::Result::eSuccess) {
+    auto [result, pipeline] = mDevice.createGraphicsPipeline(VK_NULL_HANDLE, graphicsPipelineCreateInfo);
+    if (result != vk::Result::eSuccess) {
         throw std::runtime_error("createGraphicsPipelines failed");
     }
-    mGraphicsPipeline = pipelineCreateResult.value;
+    mGraphicsPipeline = pipeline;
 
     mDevice.destroy(vertexModule);
     mDevice.destroy(fragmentModule);
@@ -828,8 +827,8 @@ void TriangleTest::createGraphicsPipeline() {
 
 vk::ShaderModule TriangleTest::createShaderModule(const std::vector<char> &code) {
     vk::ShaderModuleCreateInfo createInfo;
-    createInfo.codeSize = code.size();
-    createInfo.pCode = reinterpret_cast<const uint32_t *>(code.data());
+    createInfo.setCodeSize(code.size())
+            .setPCode(reinterpret_cast<const uint32_t *>(code.data()));
 
     return mDevice.createShaderModule(createInfo);
 }
@@ -843,12 +842,12 @@ void TriangleTest::createFrameBuffers() {
         };
 
         vk::FramebufferCreateInfo framebufferCreateInfo{};
-        framebufferCreateInfo.setRenderPass(mRenderPass);
-        framebufferCreateInfo.setAttachmentCount(1);
-        framebufferCreateInfo.setPAttachments(attachments);
-        framebufferCreateInfo.setWidth(mSwapChainExtent.width);
-        framebufferCreateInfo.setHeight(mSwapChainExtent.height);
-        framebufferCreateInfo.setLayers(1);
+        framebufferCreateInfo.setRenderPass(mRenderPass)
+                .setAttachmentCount(1)
+                .setPAttachments(attachments)
+                .setWidth(mSwapChainExtent.width)
+                .setHeight(mSwapChainExtent.height)
+                .setLayers(1);
 
         mSwapChainFrameBuffers[i] = mDevice.createFramebuffer(framebufferCreateInfo);
     }
@@ -858,17 +857,17 @@ void TriangleTest::createCommandPool() {
     QueueFamilyIndices queueFamilyIndices = findQueueFamilies(mPhysicalDevice);
 
     vk::CommandPoolCreateInfo commandPoolCreateInfo{};
-    commandPoolCreateInfo.setFlags(vk::CommandPoolCreateFlagBits::eResetCommandBuffer);
-    commandPoolCreateInfo.setQueueFamilyIndex(queueFamilyIndices.graphicQueueFamily.value());
+    commandPoolCreateInfo.setFlags(vk::CommandPoolCreateFlagBits::eResetCommandBuffer)
+            .setQueueFamilyIndex(queueFamilyIndices.graphicQueueFamily.value());
 
     mCommandPool = mDevice.createCommandPool(commandPoolCreateInfo);
 }
 
 void TriangleTest::createCommandBuffers() {
     vk::CommandBufferAllocateInfo commandBufferAllocateInfo;
-    commandBufferAllocateInfo.setCommandPool(mCommandPool);
-    commandBufferAllocateInfo.setLevel(vk::CommandBufferLevel::ePrimary);
-    commandBufferAllocateInfo.setCommandBufferCount(MAX_FRAMES_IN_FLIGHT);
+    commandBufferAllocateInfo.setCommandPool(mCommandPool)
+            .setLevel(vk::CommandBufferLevel::ePrimary)
+            .setCommandBufferCount(MAX_FRAMES_IN_FLIGHT);
 
     // 返回 vector<CommandBuffer>, 取 [0]
     mCommandBuffers = mDevice.allocateCommandBuffers(commandBufferAllocateInfo);
@@ -881,46 +880,47 @@ void TriangleTest::recordCommandBuffer(const vk::CommandBuffer &commandBuffer, u
 //    commandBufferBeginInfo.setPInheritanceInfo(nullptr);
     commandBuffer.begin(commandBufferBeginInfo);
 
+    vk::Rect2D renderArea;
+    renderArea.setOffset(vk::Offset2D{0, 0})
+            .setExtent(mSwapChainExtent);
+
     vk::RenderPassBeginInfo renderPassBeginInfo{};
-    renderPassBeginInfo.setRenderPass(mRenderPass);
-    renderPassBeginInfo.setFramebuffer(mSwapChainFrameBuffers[imageIndex]);
-    renderPassBeginInfo.renderArea.setOffset(vk::Offset2D{0, 0});
-    renderPassBeginInfo.renderArea.setExtent(mSwapChainExtent);
+    renderPassBeginInfo.setRenderPass(mRenderPass)
+            .setFramebuffer(mSwapChainFrameBuffers[imageIndex])
+            .setRenderArea(renderArea);
 
     vk::ClearValue clearValue = vk::ClearValue{mClearColor};
-    renderPassBeginInfo.setClearValueCount(1);
-    renderPassBeginInfo.setPClearValues(&clearValue);
+    renderPassBeginInfo.setClearValueCount(1)
+            .setPClearValues(&clearValue);
 
     commandBuffer.beginRenderPass(&renderPassBeginInfo, vk::SubpassContents::eInline);
     {
-        commandBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics, mGraphicsPipeline);
-
         vk::Viewport viewport;
-        viewport.x = 0.0f;
-        viewport.y = 0.0f;
-        viewport.width = (float) mSwapChainExtent.width;
-        viewport.height = (float) mSwapChainExtent.height;
-        viewport.minDepth = 0.0f;
-        viewport.maxDepth = 1.0f;
-        commandBuffer.setViewport(0, 1, &viewport);
+        viewport.setX(0.0f)
+                .setY(0.0f)
+                .setWidth((float) mSwapChainExtent.width)
+                .setHeight((float) mSwapChainExtent.height)
+                .setMinDepth(0.0f)
+                .setMaxDepth(1.0f);
 
         vk::Rect2D scissor{};
-        scissor.offset = vk::Offset2D{0, 0};
-        scissor.extent = mSwapChainExtent;
-        commandBuffer.setScissor(0, 1, &scissor);
+        scissor.setOffset(vk::Offset2D{0, 0})
+                .setExtent(mSwapChainExtent);
 
         vk::Buffer vertexBuffers[] = {mVertexBuffer};
         vk::DeviceSize offsets[] = {0};
+
+        commandBuffer.bindPipeline(vk::PipelineBindPoint::eGraphics, mGraphicsPipeline);
+        commandBuffer.setViewport(0, 1, &viewport);
+        commandBuffer.setScissor(0, 1, &scissor);
         commandBuffer.bindVertexBuffers(0, vertexBuffers, offsets);
-
         commandBuffer.bindIndexBuffer(mIndexBuffer, 0, vk::IndexType::eUint16);
-
         // vertexCount：即使我们没有顶点缓冲区，从技术上讲我们仍然有 3 个顶点要绘制。
         // instanceCount：用于实例渲染，1如果您不这样做，请使用。
         // firstVertex：用作顶点缓冲区的偏移量，定义 的最小值gl_VertexIndex。
         // firstInstance：用作实例渲染的偏移量，定义 的最小值gl_InstanceIndex。
 //        commandBuffer.draw(mVertices.size(), 1, 0, 0);
-
+        commandBuffer.bindDescriptorSets(vk::PipelineBindPoint::eGraphics, mPipelineLayout, 0, {mDescriptorSets[mCurrentFrame]}, nullptr);
         commandBuffer.drawIndexed(mIndices.size(), 1, 0, 0, 0);
     }
     commandBuffer.endRenderPass();
@@ -951,6 +951,8 @@ void TriangleTest::drawFrame() {
 
     mCommandBuffers[mCurrentFrame].reset();
     recordCommandBuffer(mCommandBuffers[mCurrentFrame], imageIndex);
+
+    updateUniformBuffer(mCurrentFrame);
 
     vk::SubmitInfo submitInfo{};
 
@@ -1008,9 +1010,13 @@ void TriangleTest::drawFrame() {
 }
 
 void TriangleTest::cleanFrameBuffers() {
-    for (auto swapChainFrameBuffer: mSwapChainFrameBuffers) {
+    for (const auto &swapChainFrameBuffer: mSwapChainFrameBuffers) {
         mDevice.destroy(swapChainFrameBuffer);
     }
+
+//    std::for_each(mSwapChainFrameBuffers.begin(), mSwapChainFrameBuffers.end(),[&](vk::Framebuffer& buffer){
+//        mDevice.destroy(buffer);
+//    });
 }
 
 void TriangleTest::createSyncObjects() {
@@ -1059,14 +1065,8 @@ void TriangleTest::recreateSwapChain() {
 }
 
 void TriangleTest::cleanUpSwapChain() {
-    for (const auto &swapChainFrameBuffer: mSwapChainFrameBuffers) {
-        mDevice.destroy(swapChainFrameBuffer);
-    }
-
-    for (const auto &swapChainImageView: mSwapChainImageViews) {
-        mDevice.destroy(swapChainImageView);
-    }
-
+    cleanFrameBuffers();
+    cleanImageViews();
     mDevice.destroy(mSwapChain);
 }
 
@@ -1133,9 +1133,10 @@ std::pair<vk::Buffer, vk::DeviceMemory> TriangleTest::createBuffer(vk::DeviceSiz
     vk::Buffer buffer = mDevice.createBuffer(bufferCreateInfo);
     vk::MemoryRequirements memoryRequirements = mDevice.getBufferMemoryRequirements(buffer);
 
+    uint32_t memoryType = findMemoryType(memoryRequirements.memoryTypeBits, properties);
     vk::MemoryAllocateInfo memoryAllocateInfo{};
-    memoryAllocateInfo.allocationSize = memoryRequirements.size;
-    memoryAllocateInfo.memoryTypeIndex = findMemoryType(memoryRequirements.memoryTypeBits, properties);
+    memoryAllocateInfo.setAllocationSize(memoryRequirements.size)
+            .setMemoryTypeIndex(memoryType);
 
     vk::DeviceMemory bufferMemory = mDevice.allocateMemory(memoryAllocateInfo);
     mDevice.bindBufferMemory(buffer, bufferMemory, 0);
@@ -1145,9 +1146,9 @@ std::pair<vk::Buffer, vk::DeviceMemory> TriangleTest::createBuffer(vk::DeviceSiz
 
 void TriangleTest::copyBuffer(vk::Buffer srcBuffer, vk::Buffer dstBuffer, vk::DeviceSize size) {
     vk::CommandBufferAllocateInfo allocateInfo{};
-    allocateInfo.setLevel(vk::CommandBufferLevel::ePrimary);
-    allocateInfo.setCommandPool(mCommandPool);
-    allocateInfo.setCommandBufferCount(1);
+    allocateInfo.setLevel(vk::CommandBufferLevel::ePrimary)
+            .setCommandPool(mCommandPool)
+            .setCommandBufferCount(1);
 
     vk::CommandBuffer commandBuffer = mDevice.allocateCommandBuffers(allocateInfo)[0];
 
@@ -1156,16 +1157,16 @@ void TriangleTest::copyBuffer(vk::Buffer srcBuffer, vk::Buffer dstBuffer, vk::De
     commandBuffer.begin(beginInfo);
 
     vk::BufferCopy bufferCopy;
-    bufferCopy.srcOffset = 0;
-    bufferCopy.dstOffset = 0;
-    bufferCopy.size = size;
+    bufferCopy.setSrcOffset(0)
+            .setDstOffset(0)
+            .setSize(size);
 
     commandBuffer.copyBuffer(srcBuffer, dstBuffer, bufferCopy);
     commandBuffer.end();
 
     vk::SubmitInfo submitInfo;
-    submitInfo.commandBufferCount = 1;
-    submitInfo.pCommandBuffers = &commandBuffer;
+    submitInfo.setCommandBufferCount(1)
+            .setPCommandBuffers(&commandBuffer);
 
     mGraphicsQueue.submit(submitInfo, VK_NULL_HANDLE);
     mGraphicsQueue.waitIdle();
@@ -1173,6 +1174,114 @@ void TriangleTest::copyBuffer(vk::Buffer srcBuffer, vk::Buffer dstBuffer, vk::De
     mDevice.freeCommandBuffers(mCommandPool, commandBuffer);
 }
 
+void TriangleTest::createDescriptorSetLayout() {
+    vk::DescriptorSetLayoutBinding layoutBinding{};
+    layoutBinding.setBinding(0)
+            .setDescriptorType(vk::DescriptorType::eUniformBuffer)
+                    // mvp 保存在一个 uniform 对象中， 描述符描述的 shader 的变量可以表示 unifrom 数组， 所以用长度为 1 的数组表示单个 uniform
+            .setDescriptorCount(1)
+                    // 在 vertex shader 中使用
+            .setStageFlags(vk::ShaderStageFlagBits::eVertex)
+                    // pImmutableSamplers 字段仅与图像采样相关的描述符相关
+            .setPImmutableSamplers(nullptr);
+
+    vk::DescriptorSetLayoutCreateInfo descriptorSetLayoutCreateInfo{};
+    descriptorSetLayoutCreateInfo.setBindingCount(1);
+    descriptorSetLayoutCreateInfo.setPBindings(&layoutBinding);
+
+    mDescriptorSetLayout = mDevice.createDescriptorSetLayout(descriptorSetLayoutCreateInfo);
+}
+
+void TriangleTest::createUniformBuffers() {
+    vk::DeviceSize bufferSize = sizeof(UniformBufferObject);
+
+    mUniformBuffers.resize(MAX_FRAMES_IN_FLIGHT);
+    mUniformBufferMemories.resize(MAX_FRAMES_IN_FLIGHT);
+    mUniformBuffersMapped.resize(MAX_FRAMES_IN_FLIGHT);
+
+    for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+        std::tie(mUniformBuffers[i], mUniformBufferMemories[i]) = createBuffer(bufferSize,
+                                                                               vk::BufferUsageFlagBits::eUniformBuffer,
+                                                                               vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
+        mUniformBuffersMapped[i] = mDevice.mapMemory(mUniformBufferMemories[i], 0, bufferSize, static_cast<vk::MemoryMapFlags>(0));
+    }
+}
+
+void TriangleTest::cleanUniformBuffers() {
+    for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+        mDevice.destroy(mUniformBuffers[i]);
+        mDevice.freeMemory(mUniformBufferMemories[i]);
+    }
+}
+
+void TriangleTest::updateUniformBuffer(uint32_t frameIndex) {
+    static auto startTime = std::chrono::high_resolution_clock::now();
+    auto currentTime = std::chrono::high_resolution_clock::now();
+    float time = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
+
+    UniformBufferObject ubo{};
+    ubo.model = glm::rotate(glm::mat4(1.0f), time * glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+    ubo.view = glm::lookAt(glm::vec3(2.0f, 2.0f, 2.0f),
+                           glm::vec3(0.0f, 0.0f, 0.0f),
+                           glm::vec3(0.0f, 0.0f, 1.0f));
+    ubo.proj = glm::perspective(glm::radians(45.0f), (float) mSwapChainExtent.width / (float) mSwapChainExtent.height, 0.1f, 10.0f);
+    // GLM 最初为 OpenGL 设计，OpenGL 中剪裁坐标的Y坐标是反转的。补偿这种情况的最简单方法是翻转投影矩阵中Y轴缩放因子的符号。如果不这样做，图像将上下颠倒。
+    ubo.proj[1][1] *= -1;
+
+    memcpy(mUniformBuffersMapped[frameIndex], &ubo, sizeof(ubo));
+}
+
+void TriangleTest::createDescriptorPool() {
+    vk::DescriptorPoolSize poolSize{};
+    poolSize.setType(vk::DescriptorType::eUniformBuffer)
+            .setDescriptorCount(MAX_FRAMES_IN_FLIGHT);
+
+    vk::DescriptorPoolCreateInfo descriptorPoolCreateInfo;
+    descriptorPoolCreateInfo.setPoolSizeCount(1)
+            .setPPoolSizes(&poolSize)
+            .setMaxSets(MAX_FRAMES_IN_FLIGHT)
+//            .setFlags(vk::DescriptorPoolCreateFlagBits::eFreeDescriptorSet);
+            .setFlags(static_cast<vk::DescriptorPoolCreateFlags>(0));
+
+    mDescriptorPool = mDevice.createDescriptorPool(descriptorPoolCreateInfo);
+}
+
+void TriangleTest::createDescriptorSets() {
+    std::vector<vk::DescriptorSetLayout> layouts(MAX_FRAMES_IN_FLIGHT, mDescriptorSetLayout);
+    vk::DescriptorSetAllocateInfo allocateInfo{};
+    allocateInfo.setDescriptorPool(mDescriptorPool)
+            .setDescriptorSetCount(MAX_FRAMES_IN_FLIGHT)
+            .setPSetLayouts(layouts.data());
+
+//    mDescriptorSets.resize(MAX_FRAMES_IN_FLIGHT);
+    mDescriptorSets = mDevice.allocateDescriptorSets(allocateInfo);
+
+    for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
+        vk::DescriptorBufferInfo descriptorBufferInfo{};
+        descriptorBufferInfo.setBuffer(mUniformBuffers[i])
+                .setOffset(0)
+                .setRange(sizeof(UniformBufferObject));
+
+        vk::WriteDescriptorSet writeDescriptorSet{};
+        writeDescriptorSet.setDstSet(mDescriptorSets[i])
+                .setDstBinding(0)
+                .setDstArrayElement(0)
+                .setDescriptorType(vk::DescriptorType::eUniformBuffer)
+                .setDescriptorCount(1)
+                        // 下面根据 DescriptorType 3 选 1 设置， 这里的描述符基于缓冲区，所以选择使用 pBufferInfo。
+                        // pBufferInfo 字段用于引用缓冲区数据的描述符
+                .setPBufferInfo(&descriptorBufferInfo)
+                        // pImageInfo 用于引用图像数据的描述符
+                .setPImageInfo(nullptr)
+                        // pTexelBufferView 用于引用缓冲区视图的描述符
+                .setPTexelBufferView(nullptr);
+
+        // descriptorCopies 用于相互复制描述符
+        mDevice.updateDescriptorSets(writeDescriptorSet, nullptr);
+    }
+
+
+}
 
 vk::Result CreateDebugUtilsMessengerEXT(vk::Instance instance,
                                         const vk::DebugUtilsMessengerCreateInfoEXT *pCreateInfo,

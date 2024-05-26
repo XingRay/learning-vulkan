@@ -7,7 +7,14 @@
 #include <cstdint>
 #include <limits>
 #include <algorithm>
+
+// 强制 GLM 所有接受角度参数的函数都使用弧度，而不是度数, 以避免任何可能的混淆。
+#define GLM_FORCE_RADIANS
+
 #include <glm/glm.hpp>
+#include <glm/gtc/matrix_transform.hpp>
+
+#include <chrono>
 
 // That way GLFW will include its own definitions and automatically load the Vulkan header with it.
 #define GLFW_INCLUDE_VULKAN
@@ -57,6 +64,13 @@ struct Vertex {
 
         return attributeDescriptions;
     }
+};
+
+
+struct UniformBufferObject {
+    glm::mat4 model;
+    glm::mat4 view;
+    glm::mat4 proj;
 };
 
 class TriangleTest {
@@ -117,6 +131,8 @@ private:
 
     vk::RenderPass mRenderPass;
 
+    vk::DescriptorSetLayout mDescriptorSetLayout;
+
     vk::PipelineLayout mPipelineLayout;
 
     vk::Pipeline mGraphicsPipeline;
@@ -159,6 +175,13 @@ private:
 
     vk::DeviceMemory mIndexBufferMemory;
 
+    std::vector<vk::Buffer> mUniformBuffers;
+    std::vector<vk::DeviceMemory> mUniformBufferMemories;
+    std::vector<void *> mUniformBuffersMapped;
+
+    vk::DescriptorPool mDescriptorPool;
+
+    std::vector<vk::DescriptorSet> mDescriptorSets;
 public:
     TriangleTest();
 
@@ -251,6 +274,17 @@ private:
     void copyBuffer(vk::Buffer srcBuffer, vk::Buffer dstBuffer, vk::DeviceSize size);
 
 
+    void createDescriptorSetLayout();
+
+    void createUniformBuffers();
+
+    void cleanUniformBuffers();
+
+    void updateUniformBuffer(uint32_t frameIndex);
+
+    void createDescriptorPool();
+
+    void createDescriptorSets();
 };
 
 
