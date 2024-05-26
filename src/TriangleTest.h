@@ -98,7 +98,7 @@ private:
     vk::Device mDevice;
 
     // 图形相关的任务队列
-    vk::Queue mGraphicQueue;
+    vk::Queue mGraphicsQueue;
 
     // 显示相关的任务队列
     vk::Queue mPresentQueue;
@@ -140,9 +140,9 @@ private:
     bool mFrameBufferResized = false;
 
     const std::vector<Vertex> mVertices = {
-            {{0.0f, -0.5f}, {1.0f, 1.0f, 1.0f}},
-            {{0.5f, 0.5f}, {0.0f, 1.0f, 0.0f}},
-            {{-0.5f, 0.5f}, {0.0f, 0.0f, 1.0f}}
+            {{0.0f, -0.5f}, {0.0f, 1.0f, 1.0f}},
+            {{0.5f, 0.5f}, {1.0f, 0.0f, 1.0f}},
+            {{-0.5f, 0.5f}, {1.0f, 1.0f, 0.0f}}
     };
 
     vk::Buffer mVertexBuffer;
@@ -234,7 +234,9 @@ private:
 
     uint32_t findMemoryType(uint32_t typeFilter, vk::MemoryPropertyFlags properties);
 
-    std::pair<vk::Buffer, vk::DeviceMemory> createBuffer(vk::DeviceSize size, vk::BufferUsageFlagBits usage, vk::MemoryPropertyFlags  properties);
+    std::pair<vk::Buffer, vk::DeviceMemory> createBuffer(vk::DeviceSize size, vk::BufferUsageFlags usage, vk::MemoryPropertyFlags  properties);
+
+    void copyBuffer(vk::Buffer srcBuffer, vk::Buffer dstBuffer, vk::DeviceSize size);
 };
 
 

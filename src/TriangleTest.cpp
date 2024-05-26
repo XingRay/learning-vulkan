@@ -392,7 +392,7 @@ void TriangleTest::createLogicDevice() {
     // 创建逻辑设备的同时会根据 deviceCreateInfo.pQueueCreateInfo 创建任务队列
     mDevice = mPhysicalDevice.createDevice(deviceCreateInfo);
     // 从逻辑设备中取出任务队列, 第二个参数为下标, 总共创建了一个队列,所以这里下标为 0
-    mGraphicQueue = mDevice.getQueue(graphicFamilyIndex, 0);
+    mGraphicsQueue = mDevice.getQueue(graphicFamilyIndex, 0);
     mPresentQueue = mDevice.getQueue(presentFamilyIndex, 0);
 }
 
@@ -964,7 +964,7 @@ void TriangleTest::drawFrame() {
     if (result != vk::Result::eSuccess) {
         throw std::runtime_error("resetFences failed");
     }
-    result = mGraphicQueue.submit(1, &submitInfo, mInFlightFences[mCurrentFrame]);
+    result = mGraphicsQueue.submit(1, &submitInfo, mInFlightFences[mCurrentFrame]);
     if (result != vk::Result::eSuccess) {
         throw std::runtime_error("graphicQueue.submit failed");
     }
@@ -1064,28 +1064,24 @@ void TriangleTest::cleanUpSwapChain() {
 }
 
 void TriangleTest::createVertexBuffer() {
-    vk::BufferCreateInfo bufferCreateInfo{};
-    bufferCreateInfo.setSize(sizeof(mVertices[0]) * mVertices.size())
-            .setUsage(vk::BufferUsageFlagBits::eVertexBuffer)
-            .setSharingMode(vk::SharingMode::eExclusive);
+    vk::DeviceSize bufferSize = sizeof(mVertices[0]) * mVertices.size();
 
-    mVertexBuffer = mDevice.createBuffer(bufferCreateInfo);
-
-    vk::MemoryRequirements memoryRequirements = mDevice.getBufferMemoryRequirements(mVertexBuffer);
-
-    vk::MemoryAllocateInfo memoryAllocateInfo{};
-    memoryAllocateInfo.allocationSize = memoryRequirements.size;
-    memoryAllocateInfo.memoryTypeIndex = findMemoryType(memoryRequirements.memoryTypeBits,
-                                                        vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
-
-    mVertexBufferMemory = mDevice.allocateMemory(memoryAllocateInfo);
-    mDevice.bindBufferMemory(mVertexBuffer, mVertexBufferMemory, 0);
-
-    void *data = mDevice.mapMemory(mVertexBufferMemory, 0, bufferCreateInfo.size, vk::MemoryMapFlagBits::ePlacedEXT);
+    auto [stagingBuffer, stagingBufferMemory] = createBuffer(bufferSize, vk::BufferUsageFlagBits::eTransferSrc,
+                                                             vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
+    void *data = mDevice.mapMemory(stagingBufferMemory, 0, bufferSize, static_cast<vk::MemoryMapFlags>(0)/*vk::MemoryMapFlagBits::ePlacedEXT*/);
     {
-        memcpy(data, mVertices.data(), (size_t) bufferCreateInfo.size);
+        memcpy(data, mVertices.data(), (size_t) bufferSize);
     }
-    mDevice.unmapMemory(mVertexBufferMemory);
+    mDevice.unmapMemory(stagingBufferMemory);
+
+    std::tie(mVertexBuffer, mVertexBufferMemory) = createBuffer(bufferSize,
+                                                                vk::BufferUsageFlagBits::eTransferDst | vk::BufferUsageFlagBits::eVertexBuffer,
+                                                                vk::MemoryPropertyFlagBits::eDeviceLocal);
+
+    copyBuffer(stagingBuffer, mVertexBuffer, bufferSize);
+
+    mDevice.destroy(stagingBuffer);
+    mDevice.freeMemory(stagingBufferMemory);
 }
 
 uint32_t TriangleTest::findMemoryType(uint32_t typeFilter, vk::MemoryPropertyFlags properties) {
@@ -1100,31 +1096,53 @@ uint32_t TriangleTest::findMemoryType(uint32_t typeFilter, vk::MemoryPropertyFla
     throw std::runtime_error("failed to find suitable memory type !");
 }
 
-std::pair<vk::Buffer, vk::DeviceMemory> TriangleTest::createBuffer(vk::DeviceSize size, vk::BufferUsageFlagBits usage, vk::MemoryPropertyFlags properties) {
+std::pair<vk::Buffer, vk::DeviceMemory> TriangleTest::createBuffer(vk::DeviceSize size, vk::BufferUsageFlags usage, vk::MemoryPropertyFlags properties) {
     vk::BufferCreateInfo bufferCreateInfo{};
-    bufferCreateInfo.setSize(sizeof(mVertices[0]) * mVertices.size())
-            .setUsage(vk::BufferUsageFlagBits::eVertexBuffer)
+    bufferCreateInfo.setSize(size)
+            .setUsage(usage)
             .setSharingMode(vk::SharingMode::eExclusive);
 
-    mVertexBuffer = mDevice.createBuffer(bufferCreateInfo);
-
-    vk::MemoryRequirements memoryRequirements = mDevice.getBufferMemoryRequirements(mVertexBuffer);
+    vk::Buffer buffer = mDevice.createBuffer(bufferCreateInfo);
+    vk::MemoryRequirements memoryRequirements = mDevice.getBufferMemoryRequirements(buffer);
 
     vk::MemoryAllocateInfo memoryAllocateInfo{};
     memoryAllocateInfo.allocationSize = memoryRequirements.size;
-    memoryAllocateInfo.memoryTypeIndex = findMemoryType(memoryRequirements.memoryTypeBits,
-                                                        vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
+    memoryAllocateInfo.memoryTypeIndex = findMemoryType(memoryRequirements.memoryTypeBits, properties);
 
-    mVertexBufferMemory = mDevice.allocateMemory(memoryAllocateInfo);
-    mDevice.bindBufferMemory(mVertexBuffer, mVertexBufferMemory, 0);
+    vk::DeviceMemory bufferMemory = mDevice.allocateMemory(memoryAllocateInfo);
+    mDevice.bindBufferMemory(buffer, bufferMemory, 0);
 
-    void *data = mDevice.mapMemory(mVertexBufferMemory, 0, bufferCreateInfo.size, vk::MemoryMapFlagBits::ePlacedEXT);
-    {
-        memcpy(data, mVertices.data(), (size_t) bufferCreateInfo.size);
-    }
-    mDevice.unmapMemory(mVertexBufferMemory);
+    return {buffer, bufferMemory};
+}
 
-    return std::pair<vk::Buffer, vk::DeviceMemory>();
+void TriangleTest::copyBuffer(vk::Buffer srcBuffer, vk::Buffer dstBuffer, vk::DeviceSize size) {
+    vk::CommandBufferAllocateInfo allocateInfo{};
+    allocateInfo.setLevel(vk::CommandBufferLevel::ePrimary);
+    allocateInfo.setCommandPool(mCommandPool);
+    allocateInfo.setCommandBufferCount(1);
+
+    vk::CommandBuffer commandBuffer = mDevice.allocateCommandBuffers(allocateInfo)[0];
+
+    vk::CommandBufferBeginInfo beginInfo{};
+    beginInfo.setFlags(vk::CommandBufferUsageFlagBits::eOneTimeSubmit);
+    commandBuffer.begin(beginInfo);
+
+    vk::BufferCopy bufferCopy;
+    bufferCopy.srcOffset = 0;
+    bufferCopy.dstOffset = 0;
+    bufferCopy.size = size;
+
+    commandBuffer.copyBuffer(srcBuffer, dstBuffer, bufferCopy);
+    commandBuffer.end();
+
+    vk::SubmitInfo submitInfo;
+    submitInfo.commandBufferCount = 1;
+    submitInfo.pCommandBuffers = &commandBuffer;
+
+    mGraphicsQueue.submit(submitInfo, VK_NULL_HANDLE);
+    mGraphicsQueue.waitIdle();
+
+    mDevice.freeCommandBuffers(mCommandPool, commandBuffer);
 }
 
 vk::Result CreateDebugUtilsMessengerEXT(vk::Instance instance,
