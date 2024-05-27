@@ -18,6 +18,10 @@ set(VULKAN_INSTALL_DIR D:\\develop\\vulkan)
 set(VULKAN_INCLUDE_DIR ${VULKAN_INSTALL_DIR}/Include)
 set(VULKAN_LIB_DIR ${VULKAN_INSTALL_DIR}/Lib)
 
+# stb
+set(STB_INSTALL_DIR D:\\develop\\opengl\\stb)
+set(STB_INCLUDE_PATH ${STB_INSTALL_DIR})
+
 
 include_directories(
         # glm
@@ -41,7 +45,7 @@ include_directories(
         ${GLFW_INCLUDE_PATH}
 
 #        # STB
-#        ${STB_INCLUDE_PATH}
+        ${STB_INCLUDE_PATH}
 
         # src
 )

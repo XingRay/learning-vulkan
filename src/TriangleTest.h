@@ -68,9 +68,15 @@ struct Vertex {
 
 
 struct UniformBufferObject {
-    glm::mat4 model;
-    glm::mat4 view;
-    glm::mat4 proj;
+    // alignas(16) 显示指定字段的对齐方式，
+    // 标量必须按N对齐（对于32位浮点数，N = 4字节）。
+    // vec2必须按2N对齐（= 8字节）。
+    // vec3或vec4必须按4N对齐（= 16字节）。
+    // 嵌套结构必须按其成员的基准对齐向上取整至16的倍数对齐。
+    // mat4矩阵必须与vec4具有相同的对齐方式。
+    alignas(16) glm::mat4 model;
+    alignas(16) glm::mat4 view;
+    alignas(16) glm::mat4 proj;
 };
 
 class TriangleTest {
@@ -182,6 +188,10 @@ private:
     vk::DescriptorPool mDescriptorPool;
 
     std::vector<vk::DescriptorSet> mDescriptorSets;
+
+    vk::Image mTextureImage;
+    vk::DeviceMemory mTextureImageMemory;
+
 public:
     TriangleTest();
 
@@ -285,6 +295,19 @@ private:
     void createDescriptorPool();
 
     void createDescriptorSets();
+
+    void createTextureImage();
+
+    std::pair<vk::Image, vk::DeviceMemory> createImage(uint32_t width, uint32_t height, vk::Format format, vk::ImageTiling imageTiling,
+                                                       vk::ImageUsageFlags imageUsage, vk::MemoryPropertyFlags memoryProperty);
+
+    vk::CommandBuffer beginSingleTimeCommands();
+
+    void endSingleTimeCommands(vk::CommandBuffer &commandBuffer);
+
+    void transitionImageLayout(vk::Image image, vk::Format format, vk::ImageLayout oldImageLayout, vk::ImageLayout newImageLayout);
+
+    void copyBufferToImage(vk::Buffer buffer, vk::Image image, uint32_t width, uint32_t height);
 };
 
 

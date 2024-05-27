@@ -13,6 +13,17 @@
 #include "QueueFamilyIndices.h"
 #include "FileUtil.h"
 
+// https://github.com/nothings/stb/issues/917
+// #define STB_IMAGE_IMPLEMENTATION 不能放在头文件中， 必须放在源文件中
+#define STB_IMAGE_IMPLEMENTATION
+
+#include <stb_image.h>
+
+//#define STB_IMAGE_WRITE_IMPLEMENTATION
+//#include "stb_image_write.h"
+
+//#define STB_IMAGE_RESIZE_IMPLEMENTATION
+//#include "stb_image_resize.h"
 
 TriangleTest::TriangleTest() {
 
@@ -71,6 +82,7 @@ void TriangleTest::initVulkan() {
     createGraphicsPipeline();
     createFrameBuffers();
     createCommandPool();
+    createTextureImage();
     createVertexBuffer();
     createIndexBuffer();
     createUniformBuffers();
@@ -92,6 +104,9 @@ void TriangleTest::mainLoop() {
 
 void TriangleTest::cleanUp() {
     cleanUpSwapChain();
+
+    mDevice.destroy(mTextureImage);
+    mDevice.freeMemory(mTextureImageMemory);
 
     cleanUniformBuffers();
     mDevice.destroy(mDescriptorPool);
@@ -934,9 +949,9 @@ void TriangleTest::drawFrame() {
         throw std::runtime_error("waitForFences failed");
     }
 
-    std::cout << "acquireNextImageKHR" << std::endl;
+//    std::cout << "acquireNextImageKHR" << std::endl;
     auto [acquireResult, imageIndex] = mDevice.acquireNextImageKHR(mSwapChain, std::numeric_limits<uint64_t>::max(), mImageAvailableSemaphores[mCurrentFrame]);
-    std::cout << "acquireNextImageKHR, acquireResult:" << acquireResult << " imageIndex:" << imageIndex << std::endl;
+//    std::cout << "acquireNextImageKHR, acquireResult:" << acquireResult << " imageIndex:" << imageIndex << std::endl;
     // VK_ERROR_OUT_OF_DATE_KHR：交换链已与表面不兼容，不能再用于渲染。通常在窗口大小调整后发生。
     // VK_SUBOPTIMAL_KHR：交换链仍然可以成功显示到表面，但表面属性不再完全匹配。
     if (acquireResult == vk::Result::eErrorOutOfDateKHR) {
@@ -947,7 +962,7 @@ void TriangleTest::drawFrame() {
         std::cout << "acquireNextImageKHR: failed" << acquireResult << std::endl;
         throw std::runtime_error("acquireNextImageKHR failed");
     }
-    std::cout << "acquireNextImageKHR eSuccess" << std::endl;
+//    std::cout << "acquireNextImageKHR eSuccess" << std::endl;
 
     mCommandBuffers[mCurrentFrame].reset();
     recordCommandBuffer(mCommandBuffers[mCurrentFrame], imageIndex);
@@ -984,7 +999,7 @@ void TriangleTest::drawFrame() {
     presentInfo.setPSwapchains(&mSwapChain);
     presentInfo.setImageIndices(imageIndex);
 
-    std::cout << "presentKHR, mFrameBufferResized:" << mFrameBufferResized << std::endl;
+//    std::cout << "presentKHR, mFrameBufferResized:" << mFrameBufferResized << std::endl;
 
     // https://github.com/KhronosGroup/Vulkan-Hpp/issues/599
     // 当出现图片不匹配时， cpp风格的 presentKHR 会抛出异常， 而不是返回 result， 而C风格的 presentKHR 接口会返回 result
@@ -995,7 +1010,7 @@ void TriangleTest::drawFrame() {
         result = vk::Result::eErrorOutOfDateKHR;
     }
 
-    std::cout << "presentKHR result:" << result << std::endl;
+//    std::cout << "presentKHR result:" << result << std::endl;
     if (result == vk::Result::eErrorOutOfDateKHR || result == vk::Result::eSuboptimalKHR || mFrameBufferResized) {
         mFrameBufferResized = false;
         std::cout << "presentKHR: eErrorOutOfDateKHR or eSuboptimalKHR or mFrameBufferResized, recreateSwapChain" << std::endl;
@@ -1004,7 +1019,7 @@ void TriangleTest::drawFrame() {
     } else if (result != vk::Result::eSuccess) {
         throw std::runtime_error("presentKHR failed");
     }
-    std::cout << "presentKHR eSuccess" << std::endl;
+//    std::cout << "presentKHR eSuccess" << std::endl;
 
     mCurrentFrame = (mCurrentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
 }
@@ -1145,33 +1160,16 @@ std::pair<vk::Buffer, vk::DeviceMemory> TriangleTest::createBuffer(vk::DeviceSiz
 }
 
 void TriangleTest::copyBuffer(vk::Buffer srcBuffer, vk::Buffer dstBuffer, vk::DeviceSize size) {
-    vk::CommandBufferAllocateInfo allocateInfo{};
-    allocateInfo.setLevel(vk::CommandBufferLevel::ePrimary)
-            .setCommandPool(mCommandPool)
-            .setCommandBufferCount(1);
+    vk::CommandBuffer commandBuffer = beginSingleTimeCommands();
+    {
+        vk::BufferCopy bufferCopy;
+        bufferCopy.setSrcOffset(0)
+                .setDstOffset(0)
+                .setSize(size);
 
-    vk::CommandBuffer commandBuffer = mDevice.allocateCommandBuffers(allocateInfo)[0];
-
-    vk::CommandBufferBeginInfo beginInfo{};
-    beginInfo.setFlags(vk::CommandBufferUsageFlagBits::eOneTimeSubmit);
-    commandBuffer.begin(beginInfo);
-
-    vk::BufferCopy bufferCopy;
-    bufferCopy.setSrcOffset(0)
-            .setDstOffset(0)
-            .setSize(size);
-
-    commandBuffer.copyBuffer(srcBuffer, dstBuffer, bufferCopy);
-    commandBuffer.end();
-
-    vk::SubmitInfo submitInfo;
-    submitInfo.setCommandBufferCount(1)
-            .setPCommandBuffers(&commandBuffer);
-
-    mGraphicsQueue.submit(submitInfo, VK_NULL_HANDLE);
-    mGraphicsQueue.waitIdle();
-
-    mDevice.freeCommandBuffers(mCommandPool, commandBuffer);
+        commandBuffer.copyBuffer(srcBuffer, dstBuffer, bufferCopy);
+    }
+    endSingleTimeCommands(commandBuffer);
 }
 
 void TriangleTest::createDescriptorSetLayout() {
@@ -1282,6 +1280,186 @@ void TriangleTest::createDescriptorSets() {
 
 
 }
+
+void TriangleTest::createTextureImage() {
+    int textureWidth;
+    int textureHeight;
+    int textureChannelCount;
+
+    stbi_uc *pixels = stbi_load("../texture/texture01.jpg", &textureWidth, &textureHeight, &textureChannelCount, STBI_rgb_alpha);
+    vk::DeviceSize imageSize = textureWidth * textureHeight * 4;
+
+    if (pixels == nullptr) {
+        throw std::runtime_error("failed to load texture image");
+    }
+
+    auto [stagingBuffer, stagingBufferMemory] = createBuffer(imageSize, vk::BufferUsageFlagBits::eTransferSrc,
+                                                             vk::MemoryPropertyFlagBits::eHostVisible | vk::MemoryPropertyFlagBits::eHostCoherent);
+    void *data = mDevice.mapMemory(stagingBufferMemory, 0, imageSize, static_cast<vk::MemoryMapFlags>(0));
+    {
+        memcpy(data, pixels, imageSize);
+    }
+    mDevice.unmapMemory(stagingBufferMemory);
+    stbi_image_free(pixels);
+
+    std::tie(mTextureImage, mTextureImageMemory) = createImage(textureWidth, textureHeight, vk::Format::eR8G8B8A8Srgb, vk::ImageTiling::eOptimal,
+                                                               vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eSampled,
+                                                               vk::MemoryPropertyFlagBits::eDeviceLocal);
+
+    transitionImageLayout(mTextureImage, vk::Format::eR8G8B8A8Srgb, vk::ImageLayout::eUndefined, vk::ImageLayout::eTransferDstOptimal);
+    copyBufferToImage(stagingBuffer, mTextureImage, textureWidth, textureHeight);
+    transitionImageLayout(mTextureImage, vk::Format::eR8G8B8A8Srgb, vk::ImageLayout::eTransferDstOptimal, vk::ImageLayout::eShaderReadOnlyOptimal);
+
+    mDevice.destroy(stagingBuffer);
+    mDevice.freeMemory(stagingBufferMemory);
+}
+
+std::pair<vk::Image, vk::DeviceMemory>
+TriangleTest::createImage(uint32_t width, uint32_t height, vk::Format format, vk::ImageTiling imageTiling, vk::ImageUsageFlags imageUsage, vk::MemoryPropertyFlags memoryProperty) {
+//    vk::DeviceSize imageSize = textureWidth * textureHeight * 4;
+
+    vk::Extent3D extent;
+    extent.setWidth(width)
+            .setHeight(height)
+            .setDepth(1);
+    vk::ImageCreateInfo imageCreateInfo;
+    imageCreateInfo.setImageType(vk::ImageType::e2D)
+            .setExtent(extent)
+            .setMipLevels(1)
+            .setArrayLayers(1)
+            .setFormat(format)
+            .setTiling(imageTiling)
+            .setInitialLayout(vk::ImageLayout::eUndefined)
+            .setUsage(imageUsage)
+            .setSharingMode(vk::SharingMode::eExclusive)
+                    // 多重采样的采样次数， 这里不需要多重采样， 采样1次即可
+            .setSamples(vk::SampleCountFlagBits::e1)
+            .setFlags(static_cast<vk::ImageCreateFlags>(0));
+
+    vk::Image image = mDevice.createImage(imageCreateInfo);
+
+    vk::MemoryRequirements memoryRequirements = mDevice.getImageMemoryRequirements(image);
+
+    vk::MemoryAllocateInfo memoryAllocateInfo;
+    uint32_t memoryType = findMemoryType(memoryRequirements.memoryTypeBits, memoryProperty);
+    memoryAllocateInfo.setAllocationSize(memoryRequirements.size)
+            .setMemoryTypeIndex(memoryType);
+
+    vk::DeviceMemory imageMemory = mDevice.allocateMemory(memoryAllocateInfo);
+
+    mDevice.bindImageMemory(image, imageMemory, 0);
+
+    return {image, imageMemory};
+}
+
+vk::CommandBuffer TriangleTest::beginSingleTimeCommands() {
+    vk::CommandBufferAllocateInfo commandBufferAllocateInfo{};
+    commandBufferAllocateInfo.setLevel(vk::CommandBufferLevel::ePrimary)
+            .setCommandPool(mCommandPool)
+            .setCommandBufferCount(1);
+
+    vk::CommandBuffer commandBuffer = mDevice.allocateCommandBuffers(commandBufferAllocateInfo)[0];
+
+    vk::CommandBufferBeginInfo commandBufferBeginInfo{};
+    commandBufferBeginInfo.setFlags(vk::CommandBufferUsageFlagBits::eOneTimeSubmit);
+
+    commandBuffer.begin(commandBufferBeginInfo);
+
+    return commandBuffer;
+}
+
+void TriangleTest::endSingleTimeCommands(vk::CommandBuffer &commandBuffer) {
+    commandBuffer.end();
+
+    vk::SubmitInfo submitInfo{};
+    submitInfo.setCommandBufferCount(1)
+            .setPCommandBuffers(&commandBuffer);
+
+    mGraphicsQueue.submit(submitInfo);
+    mGraphicsQueue.waitIdle();
+
+    mDevice.freeCommandBuffers(mCommandPool, commandBuffer);
+}
+
+void TriangleTest::transitionImageLayout(vk::Image image, vk::Format format, vk::ImageLayout oldImageLayout, vk::ImageLayout newImageLayout) {
+    vk::CommandBuffer commandBuffer = beginSingleTimeCommands();
+    {
+        vk::ImageSubresourceRange imageSubresourceRange;
+        imageSubresourceRange.setAspectMask(vk::ImageAspectFlagBits::eColor)
+                .setBaseMipLevel(0)
+                .setLevelCount(1)
+                .setBaseArrayLayer(0)
+                .setLayerCount(1);
+
+        vk::ImageMemoryBarrier imageMemoryBarrier;
+        imageMemoryBarrier.setOldLayout(oldImageLayout)
+                .setNewLayout(newImageLayout)
+                .setSrcQueueFamilyIndex(vk::QueueFamilyIgnored)
+                .setDstQueueFamilyIndex(vk::QueueFamilyIgnored)
+                .setImage(image)
+                .setSubresourceRange(imageSubresourceRange);
+//                .setSrcAccessMask(static_cast<vk::AccessFlags>(0))
+//                .setDstAccessMask(static_cast<vk::AccessFlags>(0));
+
+        vk::PipelineStageFlags sourceStage;
+        vk::PipelineStageFlags destinationStage;
+
+        if (oldImageLayout == vk::ImageLayout::eUndefined && newImageLayout == vk::ImageLayout::eTransferDstOptimal) {
+            imageMemoryBarrier.setSrcAccessMask(static_cast<vk::AccessFlags>(0))
+                    .setDstAccessMask(vk::AccessFlagBits::eTransferWrite);
+
+            sourceStage = vk::PipelineStageFlagBits::eTopOfPipe;
+            destinationStage = vk::PipelineStageFlagBits::eTransfer;
+        } else if (oldImageLayout == vk::ImageLayout::eTransferDstOptimal && newImageLayout == vk::ImageLayout::eShaderReadOnlyOptimal) {
+            imageMemoryBarrier.setSrcAccessMask(vk::AccessFlagBits::eTransferWrite)
+                    .setDstAccessMask(vk::AccessFlagBits::eShaderRead);
+
+            sourceStage = vk::PipelineStageFlagBits::eTransfer;
+            destinationStage = vk::PipelineStageFlagBits::eFragmentShader;
+        } else {
+            throw std::runtime_error("unsupported layout transition!");
+        }
+
+        commandBuffer.pipelineBarrier(sourceStage,
+                                      destinationStage,
+                                      static_cast<vk::DependencyFlags>(0),
+                // 内存屏障
+                                      {},
+                // 缓冲区内存屏障
+                                      {},
+                // 图像内存屏障
+                                      {imageMemoryBarrier});
+
+
+    }
+    endSingleTimeCommands(commandBuffer);
+}
+
+void TriangleTest::copyBufferToImage(vk::Buffer buffer, vk::Image image, uint32_t width, uint32_t height) {
+    vk::CommandBuffer commandBuffer = beginSingleTimeCommands();
+
+    vk::ImageSubresourceLayers imageSubresourceLayers;
+    imageSubresourceLayers.setAspectMask(vk::ImageAspectFlagBits::eColor)
+            .setMipLevel(0)
+            .setBaseArrayLayer(0)
+            .setLayerCount(1);
+
+    vk::Offset3D offset{0, 0, 0};
+    vk::Extent3D extent{width, height, 1};
+
+    vk::BufferImageCopy bufferImageCopy;
+    bufferImageCopy.setBufferOffset(0)
+            .setBufferRowLength(0)
+            .setBufferImageHeight(0)
+            .setImageSubresource(imageSubresourceLayers)
+            .setImageOffset(offset)
+            .setImageExtent(extent);
+
+    commandBuffer.copyBufferToImage(buffer, image, vk::ImageLayout::eTransferDstOptimal, {bufferImageCopy});
+
+    endSingleTimeCommands(commandBuffer);
+}
+
 
 vk::Result CreateDebugUtilsMessengerEXT(vk::Instance instance,
                                         const vk::DebugUtilsMessengerCreateInfoEXT *pCreateInfo,
