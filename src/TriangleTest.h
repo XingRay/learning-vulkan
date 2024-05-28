@@ -17,6 +17,11 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 
+#define GLM_ENABLE_EXPERIMENTAL
+
+#include <glm/gtx/hash.hpp>
+
+
 #include <chrono>
 
 // That way GLFW will include its own definitions and automatically load the Vulkan header with it.
@@ -75,7 +80,22 @@ struct Vertex {
 
         return attributeDescriptions;
     }
+
+    bool operator==(const Vertex &other) const {
+        return pos == other.pos && color == other.color && texCoord == other.texCoord;
+    }
 };
+
+namespace std {
+    template<>
+    struct hash<Vertex> {
+        size_t operator()(Vertex const &vertex) const {
+            return ((hash<glm::vec3>()(vertex.pos) ^
+                     (hash<glm::vec3>()(vertex.color) << 1)) >> 1) ^
+                   (hash<glm::vec2>()(vertex.texCoord) << 1);
+        }
+    };
+}
 
 
 struct UniformBufferObject {
@@ -98,6 +118,9 @@ private:
     const int32_t mWidth = (int32_t) (1024 * 1.118);
     const int32_t mHeight = 1024;
     const std::array<float, 4> mClearColor = {0.05f, 0.05f, 0.05f, 1.0f};
+
+    const char *MODEL_PATH = "../model/viking_room/viking_room.obj";
+    const char *TEXTURE_PATH = "../model/viking_room/viking_room.png";
 
     // 同时处理的帧数
     const int MAX_FRAMES_IN_FLIGHT = 2;
@@ -172,25 +195,9 @@ private:
 
     bool mFrameBufferResized = false;
 
-    const std::vector<Vertex> mVertices = {
-            {{-0.5f, -0.5f, 0.0f},  {1.0f, 0.0f, 0.0f}, {1.0f, 0.0f}},
-            {{0.5f,  -0.5f, 0.0f},  {0.0f, 1.0f, 0.0f}, {0.0f, 0.0f}},
-            {{0.5f,  0.5f,  0.0f},  {0.0f, 0.0f, 1.0f}, {0.0f, 1.0f}},
-            {{-0.5f, 0.5f,  0.0f},  {1.0f, 1.0f, 1.0f}, {1.0f, 1.0f}},
+    std::vector<Vertex> mVertices;
 
-            {{-0.5f, -0.5f, -0.5f}, {1.0f, 0.0f, 0.0f}, {1.0f, 0.0f}},
-            {{0.5f,  -0.5f, -0.5f}, {0.0f, 1.0f, 0.0f}, {0.0f, 0.0f}},
-            {{0.5f,  0.5f,  -0.5f}, {0.0f, 0.0f, 1.0f}, {0.0f, 1.0f}},
-            {{-0.5f, 0.5f,  -0.5f}, {1.0f, 1.0f, 1.0f}, {1.0f, 1.0f}},
-    };
-
-    const std::vector<uint16_t> mIndices = {
-            0, 1, 2,
-            2, 3, 0,
-
-            4, 5, 6,
-            6, 7, 4
-    };
+    std::vector<uint32_t> mIndices;
 
     vk::Buffer mVertexBuffer;
 
@@ -338,7 +345,7 @@ private:
 
     void createTextureImageView();
 
-    vk::ImageView createImageView(const vk::Image& image, const vk::Format format, vk::ImageAspectFlags imageAspect);
+    vk::ImageView createImageView(const vk::Image &image, const vk::Format format, vk::ImageAspectFlags imageAspect);
 
     void createTextureSampler();
 
@@ -351,6 +358,8 @@ private:
     bool hasStencilComponent(vk::Format format);
 
     void cleanDepthResources();
+
+    void loadModel();
 };
 
 

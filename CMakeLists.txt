@@ -4,9 +4,9 @@ set(CMAKE_CXX_STANDARD 20)
 
 
 # glfw
-set(GLFW_INSTALL_PATH D:\\develop\\opengl\\glfw\\glfw-3.4.bin.WIN64)
-set(GLFW_LIB_PATH ${GLFW_INSTALL_PATH}\\lib-vc2022)
-set(GLFW_INCLUDE_PATH ${GLFW_INSTALL_PATH}\\include)
+set(GLFW_INSTALL_DIR D:\\develop\\opengl\\glfw\\glfw-3.4.bin.WIN64)
+set(GLFW_LIB_DIR ${GLFW_INSTALL_DIR}\\lib-vc2022)
+set(GLFW_INCLUDE_DIR ${GLFW_INSTALL_DIR}\\include)
 
 # glm
 # https://github.com/g-truc/glm
@@ -20,7 +20,11 @@ set(VULKAN_LIB_DIR ${VULKAN_INSTALL_DIR}/Lib)
 
 # stb
 set(STB_INSTALL_DIR D:\\develop\\opengl\\stb)
-set(STB_INCLUDE_PATH ${STB_INSTALL_DIR})
+set(STB_INCLUDE_DIR ${STB_INSTALL_DIR})
+
+# tinyobjloader
+set(TINYOBJLOADER_INSTALL_DIR D:\\develop\\opengl\\tinyobjloader)
+set(TINYOBJLOADER_INCLUE_DIR ${TINYOBJLOADER_INSTALL_DIR})
 
 
 include_directories(
@@ -42,10 +46,13 @@ include_directories(
 #        ${GLEW_INCLUDE_PATH}
 
         # GLFW
-        ${GLFW_INCLUDE_PATH}
+        ${GLFW_INCLUDE_DIR}
 
 #        # STB
-        ${STB_INCLUDE_PATH}
+        ${STB_INCLUDE_DIR}
+
+        # tinyobjloader
+        ${TINYOBJLOADER_INCLUE_DIR}
 
         # src
 )
@@ -57,7 +64,7 @@ add_executable(${PROJECT_NAME} ${SOURCE_FILES})
 
 target_link_libraries(
         ${PROJECT_NAME}
-        ${GLFW_LIB_PATH}/glfw3.lib
+        ${GLFW_LIB_DIR}/glfw3.lib
         ${VULKAN_LIB_DIR}/vulkan-1.lib
 
 )

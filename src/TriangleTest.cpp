@@ -9,6 +9,7 @@
 #include <map>
 #include <set>
 #include <string>
+#include <unordered_map>
 
 #include "QueueFamilyIndices.h"
 #include "FileUtil.h"
@@ -24,6 +25,11 @@
 
 //#define STB_IMAGE_RESIZE_IMPLEMENTATION
 //#include "stb_image_resize.h"
+
+#define TINYOBJLOADER_IMPLEMENTATION
+
+#include <tiny_obj_loader.h>
+
 
 TriangleTest::TriangleTest() {
 
@@ -86,6 +92,7 @@ void TriangleTest::initVulkan() {
     createTextureImage();
     createTextureImageView();
     createTextureSampler();
+    loadModel();
     createVertexBuffer();
     createIndexBuffer();
     createUniformBuffers();
@@ -946,7 +953,7 @@ void TriangleTest::recordCommandBuffer(const vk::CommandBuffer &commandBuffer, u
         commandBuffer.setViewport(0, 1, &viewport);
         commandBuffer.setScissor(0, 1, &scissor);
         commandBuffer.bindVertexBuffers(0, vertexBuffers, offsets);
-        commandBuffer.bindIndexBuffer(mIndexBuffer, 0, vk::IndexType::eUint16);
+        commandBuffer.bindIndexBuffer(mIndexBuffer, 0, vk::IndexType::eUint32);
         // vertexCount：即使我们没有顶点缓冲区，从技术上讲我们仍然有 3 个顶点要绘制。
         // instanceCount：用于实例渲染，1如果您不这样做，请使用。
         // firstVertex：用作顶点缓冲区的偏移量，定义 的最小值gl_VertexIndex。
@@ -1342,7 +1349,7 @@ void TriangleTest::createTextureImage() {
     int textureHeight;
     int textureChannelCount;
 
-    stbi_uc *pixels = stbi_load("../texture/texture01.jpg", &textureWidth, &textureHeight, &textureChannelCount, STBI_rgb_alpha);
+    stbi_uc *pixels = stbi_load(TEXTURE_PATH, &textureWidth, &textureHeight, &textureChannelCount, STBI_rgb_alpha);
     vk::DeviceSize imageSize = textureWidth * textureHeight * 4;
 
     if (pixels == nullptr) {
@@ -1632,6 +1639,47 @@ void TriangleTest::cleanDepthResources() {
     mDevice.destroy(mDepthImage);
     mDevice.destroy(mDepthImageView);
     mDevice.freeMemory(mDepthImageMemory);
+}
+
+void TriangleTest::loadModel() {
+    tinyobj::attrib_t attrib;
+    std::vector<tinyobj::shape_t> shapes;
+    std::vector<tinyobj::material_t> materials;
+    std::string warning;
+    std::string error;
+
+    bool success = tinyobj::LoadObj(&attrib, &shapes, &materials, &warning, &error, MODEL_PATH);
+    if (!success) {
+        throw std::runtime_error(warning + error);
+    }
+
+    std::unordered_map<Vertex, uint32_t> uniqueVertices{};
+
+    for (const auto &shape: shapes) {
+        for (const auto &index: shape.mesh.indices) {
+            Vertex vertex{};
+
+            vertex.pos = {
+                    attrib.vertices[3 * index.vertex_index + 0],
+                    attrib.vertices[3 * index.vertex_index + 1],
+                    attrib.vertices[3 * index.vertex_index + 2]
+            };
+
+            vertex.texCoord = {
+                    attrib.texcoords[2 * index.texcoord_index + 0],
+                    1.0f - attrib.texcoords[2 * index.texcoord_index + 1],
+            };
+
+            vertex.color = {1.0f, 1.0f, 1.0f};
+
+            if(uniqueVertices.count(vertex)==0){
+                uniqueVertices[vertex] = mVertices.size();
+                mVertices.push_back(vertex);
+            }
+
+            mIndices.push_back(uniqueVertices[vertex]);
+        }
+    }
 }
 
 
