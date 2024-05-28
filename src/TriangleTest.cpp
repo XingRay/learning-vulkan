@@ -80,8 +80,9 @@ void TriangleTest::initVulkan() {
     createRenderPass();
     createDescriptorSetLayout();
     createGraphicsPipeline();
-    createFrameBuffers();
     createCommandPool();
+    createDepthResources();
+    createFrameBuffers();
     createTextureImage();
     createTextureImageView();
     createTextureSampler();
@@ -570,7 +571,7 @@ void TriangleTest::createSwapChain() {
 void TriangleTest::createImageViews() {
     mSwapChainImageViews.resize(mSwapChainImages.size());
     for (int i = 0; i < mSwapChainImages.size(); i++) {
-        mSwapChainImageViews[i] = createImageView(mSwapChainImages[i], mSwapChainImageFormat.format);
+        mSwapChainImageViews[i] = createImageView(mSwapChainImages[i], mSwapChainImageFormat.format, vk::ImageAspectFlagBits::eColor);
     }
 }
 
@@ -616,28 +617,44 @@ void TriangleTest::createRenderPass() {
     colorAttachmentReference.layout = vk::ImageLayout::eColorAttachmentOptimal;
 
 
+    vk::AttachmentDescription depthAttachmentDescription{};
+    depthAttachmentDescription.setFormat(findDepthFormat())
+            .setSamples(vk::SampleCountFlagBits::e1)
+            .setLoadOp(vk::AttachmentLoadOp::eClear)
+            .setStoreOp(vk::AttachmentStoreOp::eDontCare)
+            .setStencilLoadOp(vk::AttachmentLoadOp::eDontCare)
+            .setStencilStoreOp(vk::AttachmentStoreOp::eDontCare)
+            .setInitialLayout(vk::ImageLayout::eUndefined)
+            .setFinalLayout(vk::ImageLayout::eDepthStencilAttachmentOptimal);
+
+    vk::AttachmentReference depthAttachmentReference;
+    depthAttachmentReference.setAttachment(1)
+            .setLayout(vk::ImageLayout::eDepthStencilAttachmentOptimal);
+
     vk::SubpassDescription subpassDescription;
-    subpassDescription.setPipelineBindPoint(vk::PipelineBindPoint::eGraphics);
-    subpassDescription.setColorAttachmentCount(1);
-    subpassDescription.setPColorAttachments(&colorAttachmentReference);
+    subpassDescription.setPipelineBindPoint(vk::PipelineBindPoint::eGraphics)
+            .setColorAttachmentCount(1)
+            .setPColorAttachments(&colorAttachmentReference)
+            .setPDepthStencilAttachment(&depthAttachmentReference);
 
 
     vk::SubpassDependency subpassDependency;
     subpassDependency.setSrcSubpass(vk::SubpassExternal);
     subpassDependency.setDstSubpass(0);
-    subpassDependency.setSrcStageMask(vk::PipelineStageFlagBits::eColorAttachmentOutput);
+    subpassDependency.setSrcStageMask(vk::PipelineStageFlagBits::eColorAttachmentOutput | vk::PipelineStageFlagBits::eEarlyFragmentTests);
     subpassDependency.setSrcAccessMask(vk::AccessFlagBits::eNone);
-    subpassDependency.setDstStageMask(vk::PipelineStageFlagBits::eColorAttachmentOutput);
-    subpassDependency.setDstAccessMask(vk::AccessFlagBits::eColorAttachmentWrite);
+    subpassDependency.setDstStageMask(vk::PipelineStageFlagBits::eColorAttachmentOutput | vk::PipelineStageFlagBits::eEarlyFragmentTests);
+    subpassDependency.setDstAccessMask(vk::AccessFlagBits::eColorAttachmentWrite | vk::AccessFlagBits::eDepthStencilAttachmentWrite);
 
-
+    std::array<vk::AttachmentDescription, 2> attachements = {colorAttachmentDescription, depthAttachmentDescription};
     vk::RenderPassCreateInfo renderPassCreateInfo;
-    renderPassCreateInfo.setAttachmentCount(1);
-    renderPassCreateInfo.setPAttachments(&colorAttachmentDescription);
-    renderPassCreateInfo.setSubpassCount(1);
-    renderPassCreateInfo.setPSubpasses(&subpassDescription);
-    renderPassCreateInfo.setDependencyCount(1);
-    renderPassCreateInfo.setPDependencies(&subpassDependency);
+    renderPassCreateInfo
+//            .setAttachmentCount(attachements.size())
+            .setAttachments(attachements)
+            .setSubpassCount(1)
+            .setPSubpasses(&subpassDescription)
+            .setDependencyCount(1)
+            .setPDependencies(&subpassDependency);
 
     mRenderPass = mDevice.createRenderPass(renderPassCreateInfo);
 }
@@ -726,6 +743,16 @@ void TriangleTest::createGraphicsPipeline() {
 
     // depth & stencil testing
     vk::PipelineDepthStencilStateCreateInfo depthStencilStateCreateInfo;
+    depthStencilStateCreateInfo.setDepthTestEnable(vk::True)
+            .setDepthWriteEnable(vk::True)
+            .setDepthCompareOp(vk::CompareOp::eLess)
+            .setDepthBoundsTestEnable(vk::False)
+            .setMinDepthBounds(0.0f)
+            .setMaxDepthBounds(1.0f)
+            .setStencilTestEnable(vk::False)
+            .setFront({})
+            .setBack({});
+
 
     // Multisampling
     vk::PipelineMultisampleStateCreateInfo multisampleStateCreateInfo;
@@ -838,14 +865,15 @@ void TriangleTest::createFrameBuffers() {
     mSwapChainFrameBuffers.resize(mSwapChainImageViews.size());
 
     for (int i = 0; i < mSwapChainImageViews.size(); i++) {
-        vk::ImageView attachments[] = {
-                mSwapChainImageViews[i]
+        std::array<vk::ImageView, 2> attachments = {
+                mSwapChainImageViews[i],
+                mDepthImageView
         };
 
         vk::FramebufferCreateInfo framebufferCreateInfo{};
         framebufferCreateInfo.setRenderPass(mRenderPass)
-                .setAttachmentCount(1)
-                .setPAttachments(attachments)
+//                .setAttachmentCount(attachments.size())
+                .setAttachments(attachments)
                 .setWidth(mSwapChainExtent.width)
                 .setHeight(mSwapChainExtent.height)
                 .setLayers(1);
@@ -890,9 +918,12 @@ void TriangleTest::recordCommandBuffer(const vk::CommandBuffer &commandBuffer, u
             .setFramebuffer(mSwapChainFrameBuffers[imageIndex])
             .setRenderArea(renderArea);
 
-    vk::ClearValue clearValue = vk::ClearValue{mClearColor};
-    renderPassBeginInfo.setClearValueCount(1)
-            .setPClearValues(&clearValue);
+    vk::ClearValue colorClearValue = vk::ClearValue{mClearColor};
+    std::array<float, 4> depthStencil = {1.0f, 0, 0, 0};
+    vk::ClearValue depthStencilClearValue = vk::ClearValue{vk::ClearColorValue(depthStencil)};
+    std::array<vk::ClearValue, 2> clearValues = {colorClearValue, depthStencilClearValue};
+    renderPassBeginInfo.setClearValueCount(clearValues.size())
+            .setClearValues(clearValues);
 
     commandBuffer.beginRenderPass(&renderPassBeginInfo, vk::SubpassContents::eInline);
     {
@@ -1046,7 +1077,6 @@ void TriangleTest::cleanSyncObjects() {
 }
 
 void TriangleTest::recreateSwapChain() {
-
     // 处理最小化
     int width;
     int height;
@@ -1062,11 +1092,13 @@ void TriangleTest::recreateSwapChain() {
 
     createSwapChain();
     createImageViews();
+    createDepthResources();
     createFrameBuffers();
 }
 
 void TriangleTest::cleanUpSwapChain() {
     cleanFrameBuffers();
+    cleanDepthResources();
     cleanImageViews();
     mDevice.destroy(mSwapChain);
 }
@@ -1304,6 +1336,8 @@ void TriangleTest::createDescriptorSets() {
 }
 
 void TriangleTest::createTextureImage() {
+    std::cout << "createTextureImage" << std::endl;
+
     int textureWidth;
     int textureHeight;
     int textureChannelCount;
@@ -1384,7 +1418,6 @@ vk::CommandBuffer TriangleTest::beginSingleTimeCommands() {
 
     vk::CommandBufferBeginInfo commandBufferBeginInfo{};
     commandBufferBeginInfo.setFlags(vk::CommandBufferUsageFlagBits::eOneTimeSubmit);
-
     commandBuffer.begin(commandBufferBeginInfo);
 
     return commandBuffer;
@@ -1407,11 +1440,23 @@ void TriangleTest::transitionImageLayout(vk::Image image, vk::Format format, vk:
     vk::CommandBuffer commandBuffer = beginSingleTimeCommands();
     {
         vk::ImageSubresourceRange imageSubresourceRange;
-        imageSubresourceRange.setAspectMask(vk::ImageAspectFlagBits::eColor)
+        imageSubresourceRange
                 .setBaseMipLevel(0)
                 .setLevelCount(1)
                 .setBaseArrayLayer(0)
                 .setLayerCount(1);
+
+        // 注意这里一定要是 vk::ImageLayout::eDepthStencilAttachmentOptimal ， 写成了 vk::ImageLayout::eStencilAttachmentOptimal 后面会报警告
+        if (newImageLayout == vk::ImageLayout::eDepthStencilAttachmentOptimal) {
+            if (hasStencilComponent(format)) {
+                imageSubresourceRange.setAspectMask(vk::ImageAspectFlagBits::eDepth | vk::ImageAspectFlagBits::eStencil);
+            } else {
+                imageSubresourceRange.setAspectMask(vk::ImageAspectFlagBits::eDepth);
+            }
+        } else {
+            imageSubresourceRange.setAspectMask(vk::ImageAspectFlagBits::eColor);
+        }
+
 
         vk::ImageMemoryBarrier imageMemoryBarrier;
         imageMemoryBarrier.setOldLayout(oldImageLayout)
@@ -1438,10 +1483,17 @@ void TriangleTest::transitionImageLayout(vk::Image image, vk::Format format, vk:
 
             sourceStage = vk::PipelineStageFlagBits::eTransfer;
             destinationStage = vk::PipelineStageFlagBits::eFragmentShader;
+        } else if (oldImageLayout == vk::ImageLayout::eUndefined && newImageLayout == vk::ImageLayout::eDepthStencilAttachmentOptimal) {
+            imageMemoryBarrier.setSrcAccessMask(static_cast<vk::AccessFlags>(0))
+                    .setDstAccessMask(vk::AccessFlagBits::eDepthStencilAttachmentRead | vk::AccessFlagBits::eDepthStencilAttachmentWrite);
+
+            sourceStage = vk::PipelineStageFlagBits::eTopOfPipe;
+            destinationStage = vk::PipelineStageFlagBits::eEarlyFragmentTests;
         } else {
             throw std::runtime_error("unsupported layout transition!");
         }
 
+        std::cout << "pipelineBarrier" << std::endl;
         commandBuffer.pipelineBarrier(sourceStage,
                                       destinationStage,
                                       static_cast<vk::DependencyFlags>(0),
@@ -1483,12 +1535,11 @@ void TriangleTest::copyBufferToImage(vk::Buffer buffer, vk::Image image, uint32_
 }
 
 void TriangleTest::createTextureImageView() {
-    mTextureImageView = createImageView(mTextureImage, vk::Format::eR8G8B8A8Srgb);
+    mTextureImageView = createImageView(mTextureImage, vk::Format::eR8G8B8A8Srgb, vk::ImageAspectFlagBits::eColor);
 }
 
-vk::ImageView TriangleTest::createImageView(const vk::Image &image, const vk::Format &format) {
+vk::ImageView TriangleTest::createImageView(const vk::Image &image, const vk::Format format, vk::ImageAspectFlags imageAspect) {
     vk::ImageViewCreateInfo imageViewCreateInfo;
-
 
     imageViewCreateInfo.setImage(image)
             .setViewType(vk::ImageViewType::e2D)
@@ -1497,7 +1548,7 @@ vk::ImageView TriangleTest::createImageView(const vk::Image &image, const vk::Fo
 //            .setComponents(componentMapping);
 
     vk::ImageSubresourceRange &imageSubresourceRange = imageViewCreateInfo.subresourceRange;
-    imageSubresourceRange.setAspectMask(vk::ImageAspectFlagBits::eColor)
+    imageSubresourceRange.setAspectMask(imageAspect)
             .setBaseMipLevel(0)
             .setLevelCount(1)
             .setBaseArrayLayer(0)
@@ -1534,6 +1585,53 @@ void TriangleTest::createTextureSampler() {
             .setMaxLod(0.0f);
 
     mTextureSampler = mDevice.createSampler(samplerCreateInfo);
+}
+
+void TriangleTest::createDepthResources() {
+    std::cout << "createDepthResources" << std::endl;
+    std::vector<vk::Format> candidate;
+    vk::ImageTiling imageTiling;
+    vk::FormatFeatureFlags formatFeatureFlags;
+
+    vk::Format depthFormat = findDepthFormat();
+
+    std::tie(mDepthImage, mDepthImageMemory) = createImage(mSwapChainExtent.width, mSwapChainExtent.height, depthFormat,
+                                                           vk::ImageTiling::eOptimal,
+                                                           vk::ImageUsageFlagBits::eDepthStencilAttachment,
+                                                           vk::MemoryPropertyFlagBits::eDeviceLocal);
+    mDepthImageView = createImageView(mDepthImage, depthFormat, vk::ImageAspectFlagBits::eDepth);
+    transitionImageLayout(mDepthImage, depthFormat, vk::ImageLayout::eUndefined, vk::ImageLayout::eDepthStencilAttachmentOptimal);
+}
+
+vk::Format TriangleTest::findSupportedFormat(const std::vector<vk::Format> &candidates, vk::ImageTiling tiling, vk::FormatFeatureFlags features) {
+    for (const auto &format: candidates) {
+        vk::FormatProperties properties = mPhysicalDevice.getFormatProperties(format);
+        if (tiling == vk::ImageTiling::eLinear && (properties.linearTilingFeatures & features) == features) {
+            return format;
+        } else if (tiling == vk::ImageTiling::eOptimal && (properties.optimalTilingFeatures & features) == features) {
+            return format;
+        }
+    }
+
+    throw std::runtime_error("failed to find supported format !");
+}
+
+vk::Format TriangleTest::findDepthFormat() {
+    return findSupportedFormat(
+            {vk::Format::eD32Sfloat, vk::Format::eD32SfloatS8Uint, vk::Format::eD24UnormS8Uint},
+            vk::ImageTiling::eOptimal,
+            vk::FormatFeatureFlagBits::eDepthStencilAttachment
+    );
+}
+
+bool TriangleTest::hasStencilComponent(vk::Format format) {
+    return format == vk::Format::eD32SfloatS8Uint || format == vk::Format::eD24UnormS8Uint;
+}
+
+void TriangleTest::cleanDepthResources() {
+    mDevice.destroy(mDepthImage);
+    mDevice.destroy(mDepthImageView);
+    mDevice.freeMemory(mDepthImageMemory);
 }
 
 
