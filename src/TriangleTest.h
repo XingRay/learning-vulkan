@@ -192,6 +192,10 @@ private:
     vk::Image mTextureImage;
     vk::DeviceMemory mTextureImageMemory;
 
+    vk::ImageView mTextureImageView;
+
+    vk::Sampler mTextureSampler;
+
 public:
     TriangleTest();
 
@@ -308,6 +312,12 @@ private:
     void transitionImageLayout(vk::Image image, vk::Format format, vk::ImageLayout oldImageLayout, vk::ImageLayout newImageLayout);
 
     void copyBufferToImage(vk::Buffer buffer, vk::Image image, uint32_t width, uint32_t height);
+
+    void createTextureImageView();
+
+    vk::ImageView createImageView(const vk::Image& image, const vk::Format& format);
+
+    void createTextureSampler();
 };
 
 

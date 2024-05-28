@@ -83,6 +83,8 @@ void TriangleTest::initVulkan() {
     createFrameBuffers();
     createCommandPool();
     createTextureImage();
+    createTextureImageView();
+    createTextureSampler();
     createVertexBuffer();
     createIndexBuffer();
     createUniformBuffers();
@@ -104,6 +106,9 @@ void TriangleTest::mainLoop() {
 
 void TriangleTest::cleanUp() {
     cleanUpSwapChain();
+
+    mDevice.destroy(mTextureSampler);
+    mDevice.destroy(mTextureImageView);
 
     mDevice.destroy(mTextureImage);
     mDevice.freeMemory(mTextureImageMemory);
@@ -344,8 +349,7 @@ bool TriangleTest::isDeviceSuitable(vk::PhysicalDevice device) {
 
 //    独显
 //    vk::PhysicalDeviceType::eDiscreteGpu;
-    return deviceProperties.deviceType == vk::PhysicalDeviceType::eDiscreteGpu
-           && deviceFeatures.geometryShader;
+    return deviceProperties.deviceType == vk::PhysicalDeviceType::eDiscreteGpu && deviceFeatures.geometryShader && deviceFeatures.samplerAnisotropy;
 }
 
 int TriangleTest::rateDeviceSuitability(vk::PhysicalDevice device) {
@@ -401,13 +405,14 @@ void TriangleTest::createLogicDevice() {
 
 
     vk::PhysicalDeviceFeatures deviceFeatures{};
+    deviceFeatures.setSamplerAnisotropy(vk::True);
 
     vk::DeviceCreateInfo deviceCreateInfo;
-    deviceCreateInfo.setPQueueCreateInfos(queueCreateInfos.data());
-    deviceCreateInfo.setQueueCreateInfoCount(queueCreateInfos.size());
-    deviceCreateInfo.setPEnabledFeatures(&deviceFeatures);
-    deviceCreateInfo.setEnabledExtensionCount(mRequiredExtensions.size());
-    deviceCreateInfo.setPpEnabledExtensionNames(mRequiredExtensions.data());
+    deviceCreateInfo.setPQueueCreateInfos(queueCreateInfos.data())
+            .setQueueCreateInfoCount(queueCreateInfos.size())
+            .setPEnabledFeatures(&deviceFeatures)
+            .setEnabledExtensionCount(mRequiredExtensions.size())
+            .setPpEnabledExtensionNames(mRequiredExtensions.data());
 
     if (mEnableValidationLayer) {
         deviceCreateInfo.enabledLayerCount = mValidationLayers.size();
@@ -565,27 +570,7 @@ void TriangleTest::createSwapChain() {
 void TriangleTest::createImageViews() {
     mSwapChainImageViews.resize(mSwapChainImages.size());
     for (int i = 0; i < mSwapChainImages.size(); i++) {
-        const auto &image = mSwapChainImages[i];
-
-        vk::ImageViewCreateInfo createInfo;
-        createInfo.image = image;
-        createInfo.viewType = vk::ImageViewType::e2D;
-        createInfo.format = mSwapChainImageFormat.format;
-
-        createInfo.components.r = vk::ComponentSwizzle::eIdentity;
-        createInfo.components.g = vk::ComponentSwizzle::eIdentity;
-        createInfo.components.b = vk::ComponentSwizzle::eIdentity;
-        createInfo.components.a = vk::ComponentSwizzle::eIdentity;
-
-        createInfo.subresourceRange.aspectMask = vk::ImageAspectFlagBits::eColor;
-        // mipmap
-        createInfo.subresourceRange.baseMipLevel = 0;
-        createInfo.subresourceRange.levelCount = 1;
-        // 多图层, 比如用于vr/3d, 左右眼各自有不同的图层, 这里在屏幕显示图片,只需要一个图层
-        createInfo.subresourceRange.baseArrayLayer = 0;
-        createInfo.subresourceRange.layerCount = 1;
-
-        mSwapChainImageViews[i] = mDevice.createImageView(createInfo);
+        mSwapChainImageViews[i] = createImageView(mSwapChainImages[i], mSwapChainImageFormat.format);
     }
 }
 
@@ -1458,6 +1443,60 @@ void TriangleTest::copyBufferToImage(vk::Buffer buffer, vk::Image image, uint32_
     commandBuffer.copyBufferToImage(buffer, image, vk::ImageLayout::eTransferDstOptimal, {bufferImageCopy});
 
     endSingleTimeCommands(commandBuffer);
+}
+
+void TriangleTest::createTextureImageView() {
+    mTextureImageView = createImageView(mTextureImage, vk::Format::eR8G8B8A8Srgb);
+}
+
+vk::ImageView TriangleTest::createImageView(const vk::Image &image, const vk::Format &format) {
+    vk::ImageViewCreateInfo imageViewCreateInfo;
+
+
+    imageViewCreateInfo.setImage(image)
+            .setViewType(vk::ImageViewType::e2D)
+            .setFormat(format);
+//            .setSubresourceRange(imageSubresourceRange)
+//            .setComponents(componentMapping);
+
+    vk::ImageSubresourceRange &imageSubresourceRange = imageViewCreateInfo.subresourceRange;
+    imageSubresourceRange.setAspectMask(vk::ImageAspectFlagBits::eColor)
+            .setBaseMipLevel(0)
+            .setLevelCount(1)
+            .setBaseArrayLayer(0)
+            .setLayerCount(1);
+
+    vk::ComponentMapping &componentMapping = imageViewCreateInfo.components;
+    componentMapping.setR(vk::ComponentSwizzle::eIdentity)
+            .setG(vk::ComponentSwizzle::eIdentity)
+            .setB(vk::ComponentSwizzle::eIdentity)
+            .setA(vk::ComponentSwizzle::eIdentity);
+
+    return mDevice.createImageView(imageViewCreateInfo);
+}
+
+void TriangleTest::createTextureSampler() {
+    vk::PhysicalDeviceProperties properties = mPhysicalDevice.getProperties();
+
+    vk::SamplerCreateInfo samplerCreateInfo;
+    samplerCreateInfo.setMagFilter(vk::Filter::eLinear)
+            .setMinFilter(vk::Filter::eLinear)
+            .setAddressModeU(vk::SamplerAddressMode::eRepeat)
+            .setAddressModeV(vk::SamplerAddressMode::eRepeat)
+            .setAddressModeW(vk::SamplerAddressMode::eRepeat)
+            .setAnisotropyEnable(vk::True)
+            .setMaxAnisotropy(properties.limits.maxSamplerAnisotropy)
+            .setBorderColor(vk::BorderColor::eIntOpaqueBlack)
+                    // 是否使用不归一化的坐标(x:[0~width], y:[0~height])， 通常使用归一化坐标(x:[0~1.0], y:[0~1.0])， 所以设置为 false，
+            .setUnnormalizedCoordinates(vk::False)
+            .setCompareEnable(vk::False)
+            .setCompareOp(vk::CompareOp::eAlways)
+            .setMipmapMode(vk::SamplerMipmapMode::eLinear)
+            .setMipLodBias(0.0f)
+            .setMinLod(0.0f)
+            .setMaxLod(0.0f);
+
+    mTextureSampler = mDevice.createSampler(samplerCreateInfo);
 }
 
 
