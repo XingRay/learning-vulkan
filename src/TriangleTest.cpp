@@ -683,12 +683,13 @@ void TriangleTest::createGraphicsPipeline() {
 
     // vertex shader
     vk::VertexInputBindingDescription bindingDescription = Vertex::getBindingDescription();
-    std::array<vk::VertexInputAttributeDescription, 2> attributeDescriptions = Vertex::getAttributeDescriptions();
+    std::array<vk::VertexInputAttributeDescription, 3> attributeDescriptions = Vertex::getAttributeDescriptions();
     vk::PipelineVertexInputStateCreateInfo vertexInputStateCreateInfo;
     vertexInputStateCreateInfo.setPVertexBindingDescriptions(&bindingDescription)
             .setVertexBindingDescriptionCount(1)
             .setPVertexAttributeDescriptions(attributeDescriptions.data())
             .setVertexAttributeDescriptionCount(attributeDescriptions.size());
+//            .setVertexAttributeDescriptions(attributeDescriptions);
 
     vk::PipelineShaderStageCreateInfo vertexShaderStageCreateInfo;
     vertexShaderStageCreateInfo.setStage(vk::ShaderStageFlagBits::eVertex)
@@ -1158,8 +1159,8 @@ void TriangleTest::copyBuffer(vk::Buffer srcBuffer, vk::Buffer dstBuffer, vk::De
 }
 
 void TriangleTest::createDescriptorSetLayout() {
-    vk::DescriptorSetLayoutBinding layoutBinding{};
-    layoutBinding.setBinding(0)
+    vk::DescriptorSetLayoutBinding uboLayoutBinding{};
+    uboLayoutBinding.setBinding(0)
             .setDescriptorType(vk::DescriptorType::eUniformBuffer)
                     // mvp 保存在一个 uniform 对象中， 描述符描述的 shader 的变量可以表示 unifrom 数组， 所以用长度为 1 的数组表示单个 uniform
             .setDescriptorCount(1)
@@ -1168,9 +1169,19 @@ void TriangleTest::createDescriptorSetLayout() {
                     // pImmutableSamplers 字段仅与图像采样相关的描述符相关
             .setPImmutableSamplers(nullptr);
 
+    vk::DescriptorSetLayoutBinding samplerLayoutBinding{};
+    samplerLayoutBinding.setBinding(1)
+            .setDescriptorCount(1)
+            .setDescriptorType(vk::DescriptorType::eCombinedImageSampler)
+            .setPImmutableSamplers(nullptr)
+            .setStageFlags(vk::ShaderStageFlagBits::eFragment);
+
+    std::array<vk::DescriptorSetLayoutBinding, 2> bindings = {uboLayoutBinding, samplerLayoutBinding};
+
     vk::DescriptorSetLayoutCreateInfo descriptorSetLayoutCreateInfo{};
-    descriptorSetLayoutCreateInfo.setBindingCount(1);
-    descriptorSetLayoutCreateInfo.setPBindings(&layoutBinding);
+    descriptorSetLayoutCreateInfo
+//            .setBindingCount(bindings.size())
+            .setBindings(bindings);
 
     mDescriptorSetLayout = mDevice.createDescriptorSetLayout(descriptorSetLayoutCreateInfo);
 }
@@ -1215,13 +1226,20 @@ void TriangleTest::updateUniformBuffer(uint32_t frameIndex) {
 }
 
 void TriangleTest::createDescriptorPool() {
-    vk::DescriptorPoolSize poolSize{};
-    poolSize.setType(vk::DescriptorType::eUniformBuffer)
+    vk::DescriptorPoolSize uboPoolSize{};
+    uboPoolSize.setType(vk::DescriptorType::eUniformBuffer)
             .setDescriptorCount(MAX_FRAMES_IN_FLIGHT);
 
+    vk::DescriptorPoolSize samplerPoolSize{};
+    samplerPoolSize.setType(vk::DescriptorType::eCombinedImageSampler)
+            .setDescriptorCount(MAX_FRAMES_IN_FLIGHT);
+
+    std::array<vk::DescriptorPoolSize, 2> poolSizes = {uboPoolSize, samplerPoolSize};
+
     vk::DescriptorPoolCreateInfo descriptorPoolCreateInfo;
-    descriptorPoolCreateInfo.setPoolSizeCount(1)
-            .setPPoolSizes(&poolSize)
+    descriptorPoolCreateInfo
+            .setPoolSizeCount(poolSizes.size())
+            .setPoolSizes(poolSizes)
             .setMaxSets(MAX_FRAMES_IN_FLIGHT)
 //            .setFlags(vk::DescriptorPoolCreateFlagBits::eFreeDescriptorSet);
             .setFlags(static_cast<vk::DescriptorPoolCreateFlags>(0));
@@ -1240,30 +1258,49 @@ void TriangleTest::createDescriptorSets() {
     mDescriptorSets = mDevice.allocateDescriptorSets(allocateInfo);
 
     for (int i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
-        vk::DescriptorBufferInfo descriptorBufferInfo{};
-        descriptorBufferInfo.setBuffer(mUniformBuffers[i])
+        vk::DescriptorBufferInfo uboDescriptorBufferInfo{};
+        uboDescriptorBufferInfo.setBuffer(mUniformBuffers[i])
                 .setOffset(0)
                 .setRange(sizeof(UniformBufferObject));
 
-        vk::WriteDescriptorSet writeDescriptorSet{};
-        writeDescriptorSet.setDstSet(mDescriptorSets[i])
+        vk::WriteDescriptorSet uboWriteDescriptorSet{};
+        uboWriteDescriptorSet.setDstSet(mDescriptorSets[i])
                 .setDstBinding(0)
                 .setDstArrayElement(0)
                 .setDescriptorType(vk::DescriptorType::eUniformBuffer)
                 .setDescriptorCount(1)
                         // 下面根据 DescriptorType 3 选 1 设置， 这里的描述符基于缓冲区，所以选择使用 pBufferInfo。
                         // pBufferInfo 字段用于引用缓冲区数据的描述符
-                .setPBufferInfo(&descriptorBufferInfo)
+                .setPBufferInfo(&uboDescriptorBufferInfo)
                         // pImageInfo 用于引用图像数据的描述符
                 .setPImageInfo(nullptr)
                         // pTexelBufferView 用于引用缓冲区视图的描述符
                 .setPTexelBufferView(nullptr);
 
+
+        vk::DescriptorImageInfo samplerDescriptorImageInfo;
+        samplerDescriptorImageInfo.setImageLayout(vk::ImageLayout::eShaderReadOnlyOptimal)
+                .setImageView(mTextureImageView)
+                .setSampler(mTextureSampler);
+
+        vk::WriteDescriptorSet samplerWriteDescriptorSet{};
+        samplerWriteDescriptorSet.setDstSet(mDescriptorSets[i])
+                .setDstBinding(1)
+                .setDstArrayElement(0)
+                .setDescriptorType(vk::DescriptorType::eCombinedImageSampler)
+                .setDescriptorCount(1)
+                        // 下面根据 DescriptorType 3 选 1 设置， 这里的描述符基于缓冲区，所以选择使用 pBufferInfo。
+                        // pBufferInfo 字段用于引用缓冲区数据的描述符
+                .setPBufferInfo(nullptr)
+                        // pImageInfo 用于引用图像数据的描述符
+                .setPImageInfo(&samplerDescriptorImageInfo)
+                        // pTexelBufferView 用于引用缓冲区视图的描述符
+                .setPTexelBufferView(nullptr);
+
+        std::array<vk::WriteDescriptorSet, 2> writeDescriptorSets = {uboWriteDescriptorSet, samplerWriteDescriptorSet};
         // descriptorCopies 用于相互复制描述符
-        mDevice.updateDescriptorSets(writeDescriptorSet, nullptr);
+        mDevice.updateDescriptorSets(writeDescriptorSets, nullptr);
     }
-
-
 }
 
 void TriangleTest::createTextureImage() {

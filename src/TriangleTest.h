@@ -32,6 +32,9 @@ struct Vertex {
     // 颜色
     glm::vec3 color;
 
+    // 纹理坐标
+    glm::vec2 texCoord;
+
     static vk::VertexInputBindingDescription getBindingDescription() {
         vk::VertexInputBindingDescription description;
 
@@ -47,8 +50,8 @@ struct Vertex {
         return description;
     }
 
-    static std::array<vk::VertexInputAttributeDescription, 2> getAttributeDescriptions() {
-        std::array<vk::VertexInputAttributeDescription, 2> attributeDescriptions{};
+    static std::array<vk::VertexInputAttributeDescription, 3> getAttributeDescriptions() {
+        std::array<vk::VertexInputAttributeDescription, 3> attributeDescriptions{};
 
         // 位置
         attributeDescriptions[0].binding = 0;
@@ -61,6 +64,11 @@ struct Vertex {
         attributeDescriptions[1].location = 1;
         attributeDescriptions[1].format = vk::Format::eR32G32B32Sfloat;
         attributeDescriptions[1].offset = offsetof(Vertex, color);
+
+        attributeDescriptions[2].binding = 0;
+        attributeDescriptions[2].location = 2;
+        attributeDescriptions[2].format = vk::Format::eR32G32Sfloat;
+        attributeDescriptions[2].offset = offsetof(Vertex, texCoord);
 
         return attributeDescriptions;
     }
@@ -162,10 +170,10 @@ private:
     bool mFrameBufferResized = false;
 
     const std::vector<Vertex> mVertices = {
-            {{-0.5f, -0.5f}, {1.0f, 0.0f, 0.0f}},
-            {{0.5f,  -0.5f}, {0.0f, 1.0f, 0.0f}},
-            {{0.5f,  0.5f},  {0.0f, 0.0f, 1.0f}},
-            {{-0.5f, 0.5f},  {1.0f, 1.0f, 1.0f}},
+            {{-0.5f, -0.5f}, {1.0f, 0.0f, 0.0f}, {1.0f, 0.0f}},
+            {{0.5f,  -0.5f}, {0.0f, 1.0f, 0.0f}, {0.0f, 0.0f}},
+            {{0.5f,  0.5f},  {0.0f, 0.0f, 1.0f}, {0.0f, 1.0f}},
+            {{-0.5f, 0.5f},  {1.0f, 1.0f, 1.0f}, {1.0f, 1.0f}},
     };
 
     const std::vector<uint16_t> mIndices = {
@@ -315,7 +323,7 @@ private:
 
     void createTextureImageView();
 
-    vk::ImageView createImageView(const vk::Image& image, const vk::Format& format);
+    vk::ImageView createImageView(const vk::Image &image, const vk::Format &format);
 
     void createTextureSampler();
 };
