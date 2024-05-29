@@ -224,8 +224,14 @@ private:
     vk::Sampler mTextureSampler;
 
     vk::Image mDepthImage;
-    vk::DeviceMemory mDepthImageMemory;
+    vk::DeviceMemory mDepthDeviceMemory;
     vk::ImageView mDepthImageView;
+
+    vk::SampleCountFlagBits mMsaaSamples = vk::SampleCountFlagBits::e1;
+
+    vk::Image mColorImage;
+    vk::DeviceMemory mColorDeviceMemory;
+    vk::ImageView mColorImageView;
 
 public:
     TriangleTest();
@@ -260,7 +266,7 @@ private:
 
     int rateDeviceSuitability(vk::PhysicalDevice device);
 
-    void createLogicDevice();
+    void createLogicalDevice();
 
     QueueFamilyIndices findQueueFamilies(vk::PhysicalDevice &device);
 
@@ -333,7 +339,8 @@ private:
 
     void createTextureImage();
 
-    std::pair<vk::Image, vk::DeviceMemory> createImage(uint32_t width, uint32_t height, uint32_t mipLevels, vk::Format format, vk::ImageTiling imageTiling,
+    std::pair<vk::Image, vk::DeviceMemory> createImage(uint32_t width, uint32_t height, uint32_t mipLevels, vk::SampleCountFlagBits numSamples,
+                                                       vk::Format format, vk::ImageTiling imageTiling,
                                                        vk::ImageUsageFlags imageUsage, vk::MemoryPropertyFlags memoryProperty);
 
     vk::CommandBuffer beginSingleTimeCommands();
@@ -363,6 +370,12 @@ private:
     void loadModel();
 
     void generateMipmaps(vk::Image image, vk::Format imageFormat, int textureWidth, int textureHeight, uint32_t mipLevels);
+
+    vk::SampleCountFlagBits getMaxUsableSampleCount();
+
+    void createColorResources();
+
+    void cleanColorResources();
 };
 
 

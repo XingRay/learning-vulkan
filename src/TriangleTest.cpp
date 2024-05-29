@@ -80,13 +80,14 @@ void TriangleTest::initVulkan() {
     setupDebugMessenger();
     createSurface();
     pickPhysicalDevice();
-    createLogicDevice();
+    createLogicalDevice();
     createSwapChain();
     createImageViews();
     createRenderPass();
     createDescriptorSetLayout();
     createGraphicsPipeline();
     createCommandPool();
+    createColorResources();
     createDepthResources();
     createFrameBuffers();
     createTextureImage();
@@ -303,6 +304,7 @@ void TriangleTest::pickPhysicalDevice() {
     for (const auto &device: devices) {
         if (isDeviceSuitable(device)) {
             mPhysicalDevice = device;
+            mMsaaSamples = getMaxUsableSampleCount();
             break;
         }
     }
@@ -381,8 +383,8 @@ int TriangleTest::rateDeviceSuitability(vk::PhysicalDevice device) {
     return score;
 }
 
-void TriangleTest::createLogicDevice() {
-    std::cout << "createLogicDevice\n";
+void TriangleTest::createLogicalDevice() {
+    std::cout << "createLogicalDevice\n";
     QueueFamilyIndices indices = findQueueFamilies(mPhysicalDevice);
     if (!indices.isComplete()) {
         std::cout << "findQueueFamilies failed, indices is not complete" << std::endl;
@@ -413,7 +415,8 @@ void TriangleTest::createLogicDevice() {
 
 
     vk::PhysicalDeviceFeatures deviceFeatures{};
-    deviceFeatures.setSamplerAnisotropy(vk::True);
+    deviceFeatures.setSamplerAnisotropy(vk::True)
+            .setSampleRateShading(vk::True);
 
     vk::DeviceCreateInfo deviceCreateInfo;
     deviceCreateInfo.setPQueueCreateInfos(queueCreateInfos.data())
@@ -589,44 +592,40 @@ void TriangleTest::cleanImageViews() {
 }
 
 void TriangleTest::createRenderPass() {
-    vk::AttachmentDescription colorAttachmentDescription;
-    colorAttachmentDescription.setFormat(mSwapChainImageFormat.format);
-    colorAttachmentDescription.setSamples(vk::SampleCountFlagBits::e1);
+    vk::AttachmentDescription colorAttachmentDescription{};
+    colorAttachmentDescription.setFormat(mSwapChainImageFormat.format)
+            .setSamples(mMsaaSamples)
+                    //载入图像前将帧缓冲清0
+            .setLoadOp(vk::AttachmentLoadOp::eClear)
+                    // 渲染图像之后将图像数据保存
+            .setStoreOp(vk::AttachmentStoreOp::eStore)
+                    // 模版缓冲, 这里不关注
+            .setStencilLoadOp(vk::AttachmentLoadOp::eDontCare)
+            .setStencilStoreOp(vk::AttachmentStoreOp::eDontCare)
+                    // 常见的布局
+                    //
+                    //VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL：用作彩色附件的图像
+                    //VK_IMAGE_LAYOUT_PRESENT_SRC_KHR：要在交换链中呈现的图像
+                    //VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL：用作内存复制操作目标的图像
+                    //
+                    // initialLayout 渲染通道开始之前图像将具有的布局
+                    // finalLayout 渲染通道完成时自动转换到的布局
+                    //
+                    // 使用 VK_IMAGE_LAYOUT_UNDEFINED 意味着我们不关心图像以前的布局
+                    // 这个特殊值的警告是图像的内容不能保证被保留，但这并不重要，因为我们无论如何要清除
+            .setInitialLayout(vk::ImageLayout::eUndefined)
+                    // 我们希望图像在渲染后准备好使用交换链进行呈现，所以我们设置finalLayout 为 VK_IMAGE_LAYOUT_PRESENT_SRC_KHRas
+            .setFinalLayout(vk::ImageLayout::eColorAttachmentOptimal);
 
-    //载入图像前将帧缓冲清0
-    colorAttachmentDescription.setLoadOp(vk::AttachmentLoadOp::eClear);
-
-    // 渲染图像之后将图像数据保存
-    colorAttachmentDescription.setStoreOp(vk::AttachmentStoreOp::eStore);
-
-    // 模版缓冲, 这里不关注
-    colorAttachmentDescription.setStencilLoadOp(vk::AttachmentLoadOp::eDontCare);
-    colorAttachmentDescription.setStencilStoreOp(vk::AttachmentStoreOp::eDontCare);
-
-    // 常见的布局
-    //
-    //VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL：用作彩色附件的图像
-    //VK_IMAGE_LAYOUT_PRESENT_SRC_KHR：要在交换链中呈现的图像
-    //VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL：用作内存复制操作目标的图像
-    //
-    // initialLayout 渲染通道开始之前图像将具有的布局
-    // finalLayout 渲染通道完成时自动转换到的布局
-    //
-    // 使用 VK_IMAGE_LAYOUT_UNDEFINED 意味着我们不关心图像以前的布局
-    // 这个特殊值的警告是图像的内容不能保证被保留，但这并不重要，因为我们无论如何要清除
-    colorAttachmentDescription.setInitialLayout(vk::ImageLayout::eUndefined);
-    // 我们希望图像在渲染后准备好使用交换链进行呈现，所以我们设置finalLayout 为 VK_IMAGE_LAYOUT_PRESENT_SRC_KHRas
-    colorAttachmentDescription.setFinalLayout(vk::ImageLayout::ePresentSrcKHR);
-
-    vk::AttachmentReference colorAttachmentReference;
+    vk::AttachmentReference colorAttachmentReference{};
     // 多个 colorAttachmentDescription 组成数组, 上面只有一个 colorAttachmentDescription, 那么下标为 0
-    colorAttachmentReference.attachment = 0;
-    colorAttachmentReference.layout = vk::ImageLayout::eColorAttachmentOptimal;
+    colorAttachmentReference.setAttachment(0)
+            .setLayout(vk::ImageLayout::eColorAttachmentOptimal);
 
 
     vk::AttachmentDescription depthAttachmentDescription{};
     depthAttachmentDescription.setFormat(findDepthFormat())
-            .setSamples(vk::SampleCountFlagBits::e1)
+            .setSamples(mMsaaSamples)
             .setLoadOp(vk::AttachmentLoadOp::eClear)
             .setStoreOp(vk::AttachmentStoreOp::eDontCare)
             .setStencilLoadOp(vk::AttachmentLoadOp::eDontCare)
@@ -634,18 +633,33 @@ void TriangleTest::createRenderPass() {
             .setInitialLayout(vk::ImageLayout::eUndefined)
             .setFinalLayout(vk::ImageLayout::eDepthStencilAttachmentOptimal);
 
-    vk::AttachmentReference depthAttachmentReference;
+    vk::AttachmentReference depthAttachmentReference{};
     depthAttachmentReference.setAttachment(1)
             .setLayout(vk::ImageLayout::eDepthStencilAttachmentOptimal);
 
-    vk::SubpassDescription subpassDescription;
+    vk::AttachmentDescription colorAttachmentResolveDescription{};
+    colorAttachmentResolveDescription.setFormat(mSwapChainImageFormat.format)
+            .setSamples(vk::SampleCountFlagBits::e1)
+            .setLoadOp(vk::AttachmentLoadOp::eDontCare)
+            .setStoreOp(vk::AttachmentStoreOp::eStore)
+            .setStencilLoadOp(vk::AttachmentLoadOp::eDontCare)
+            .setStencilStoreOp(vk::AttachmentStoreOp::eDontCare)
+            .setInitialLayout(vk::ImageLayout::eUndefined)
+            .setFinalLayout(vk::ImageLayout::ePresentSrcKHR);
+
+    vk::AttachmentReference colorAttachmentResolveReference{};
+    colorAttachmentResolveReference.setAttachment(2)
+            .setLayout(vk::ImageLayout::eColorAttachmentOptimal);
+
+    vk::SubpassDescription subpassDescription{};
     subpassDescription.setPipelineBindPoint(vk::PipelineBindPoint::eGraphics)
             .setColorAttachmentCount(1)
             .setPColorAttachments(&colorAttachmentReference)
-            .setPDepthStencilAttachment(&depthAttachmentReference);
+            .setPDepthStencilAttachment(&depthAttachmentReference)
+            .setPResolveAttachments(&colorAttachmentResolveReference);
 
 
-    vk::SubpassDependency subpassDependency;
+    vk::SubpassDependency subpassDependency{};
     subpassDependency.setSrcSubpass(vk::SubpassExternal);
     subpassDependency.setDstSubpass(0);
     subpassDependency.setSrcStageMask(vk::PipelineStageFlagBits::eColorAttachmentOutput | vk::PipelineStageFlagBits::eEarlyFragmentTests);
@@ -653,11 +667,11 @@ void TriangleTest::createRenderPass() {
     subpassDependency.setDstStageMask(vk::PipelineStageFlagBits::eColorAttachmentOutput | vk::PipelineStageFlagBits::eEarlyFragmentTests);
     subpassDependency.setDstAccessMask(vk::AccessFlagBits::eColorAttachmentWrite | vk::AccessFlagBits::eDepthStencilAttachmentWrite);
 
-    std::array<vk::AttachmentDescription, 2> attachements = {colorAttachmentDescription, depthAttachmentDescription};
-    vk::RenderPassCreateInfo renderPassCreateInfo;
+    std::array<vk::AttachmentDescription, 3> attachments = {colorAttachmentDescription, depthAttachmentDescription, colorAttachmentResolveDescription};
+    vk::RenderPassCreateInfo renderPassCreateInfo{};
     renderPassCreateInfo
-//            .setAttachmentCount(attachements.size())
-            .setAttachments(attachements)
+//            .setAttachmentCount(attachments.size())
+            .setAttachments(attachments)
             .setSubpassCount(1)
             .setPSubpasses(&subpassDescription)
             .setDependencyCount(1)
@@ -763,9 +777,9 @@ void TriangleTest::createGraphicsPipeline() {
 
     // Multisampling
     vk::PipelineMultisampleStateCreateInfo multisampleStateCreateInfo;
-    multisampleStateCreateInfo.setSampleShadingEnable(vk::False)
-            .setRasterizationSamples(vk::SampleCountFlagBits::e1)
-            .setMinSampleShading(1.0f)
+    multisampleStateCreateInfo.setSampleShadingEnable(vk::True)
+            .setRasterizationSamples(mMsaaSamples)
+            .setMinSampleShading(0.2f)
             .setPSampleMask(nullptr)
             .setAlphaToCoverageEnable(vk::False)
             .setAlphaToOneEnable(vk::False);
@@ -872,9 +886,10 @@ void TriangleTest::createFrameBuffers() {
     mSwapChainFrameBuffers.resize(mSwapChainImageViews.size());
 
     for (int i = 0; i < mSwapChainImageViews.size(); i++) {
-        std::array<vk::ImageView, 2> attachments = {
+        std::array<vk::ImageView, 3> attachments = {
+                mColorImageView,
+                mDepthImageView,
                 mSwapChainImageViews[i],
-                mDepthImageView
         };
 
         vk::FramebufferCreateInfo framebufferCreateInfo{};
@@ -1099,12 +1114,14 @@ void TriangleTest::recreateSwapChain() {
 
     createSwapChain();
     createImageViews();
+    createColorResources();
     createDepthResources();
     createFrameBuffers();
 }
 
 void TriangleTest::cleanUpSwapChain() {
     cleanFrameBuffers();
+    cleanColorResources();
     cleanDepthResources();
     cleanImageViews();
     mDevice.destroy(mSwapChain);
@@ -1366,7 +1383,7 @@ void TriangleTest::createTextureImage() {
     mDevice.unmapMemory(stagingBufferMemory);
     stbi_image_free(pixels);
 
-    std::tie(mTextureImage, mTextureImageMemory) = createImage(textureWidth, textureHeight, mMipLevels,
+    std::tie(mTextureImage, mTextureImageMemory) = createImage(textureWidth, textureHeight, mMipLevels, vk::SampleCountFlagBits::e1,
                                                                vk::Format::eR8G8B8A8Srgb, vk::ImageTiling::eOptimal,
                                                                vk::ImageUsageFlagBits::eTransferSrc | vk::ImageUsageFlagBits::eTransferDst | vk::ImageUsageFlagBits::eSampled,
                                                                vk::MemoryPropertyFlagBits::eDeviceLocal);
@@ -1385,7 +1402,8 @@ void TriangleTest::createTextureImage() {
 }
 
 std::pair<vk::Image, vk::DeviceMemory>
-TriangleTest::createImage(uint32_t width, uint32_t height, uint32_t mipLevels, vk::Format format, vk::ImageTiling imageTiling, vk::ImageUsageFlags imageUsage, vk::MemoryPropertyFlags memoryProperty) {
+TriangleTest::createImage(uint32_t width, uint32_t height, uint32_t mipLevels, vk::SampleCountFlagBits numSamples,
+                          vk::Format format, vk::ImageTiling imageTiling, vk::ImageUsageFlags imageUsage, vk::MemoryPropertyFlags memoryProperty) {
 //    vk::DeviceSize imageSize = textureWidth * textureHeight * 4;
 
     vk::Extent3D extent;
@@ -1402,8 +1420,7 @@ TriangleTest::createImage(uint32_t width, uint32_t height, uint32_t mipLevels, v
             .setInitialLayout(vk::ImageLayout::eUndefined)
             .setUsage(imageUsage)
             .setSharingMode(vk::SharingMode::eExclusive)
-                    // 多重采样的采样次数， 这里不需要多重采样， 采样1次即可
-            .setSamples(vk::SampleCountFlagBits::e1)
+            .setSamples(numSamples)
             .setFlags(static_cast<vk::ImageCreateFlags>(0));
 
     vk::Image image = mDevice.createImage(imageCreateInfo);
@@ -1596,7 +1613,7 @@ void TriangleTest::createTextureSampler() {
             .setMipmapMode(vk::SamplerMipmapMode::eLinear)
             .setMipLodBias(0.0f)
             .setMinLod(0.0f)
-            // 测试： 强制使用高等级 mipmap （更模糊）
+                    // 测试： 强制使用高等级 mipmap （更模糊）
 //            .setMinLod(static_cast<float >(mMipLevels / 2))
             .setMaxLod(static_cast<float >(mMipLevels));
 
@@ -1611,10 +1628,11 @@ void TriangleTest::createDepthResources() {
 
     vk::Format depthFormat = findDepthFormat();
 
-    std::tie(mDepthImage, mDepthImageMemory) = createImage(mSwapChainExtent.width, mSwapChainExtent.height, 1, depthFormat,
-                                                           vk::ImageTiling::eOptimal,
-                                                           vk::ImageUsageFlagBits::eDepthStencilAttachment,
-                                                           vk::MemoryPropertyFlagBits::eDeviceLocal);
+    std::tie(mDepthImage, mDepthDeviceMemory) = createImage(mSwapChainExtent.width, mSwapChainExtent.height, 1, mMsaaSamples,
+                                                            depthFormat,
+                                                            vk::ImageTiling::eOptimal,
+                                                            vk::ImageUsageFlagBits::eDepthStencilAttachment,
+                                                            vk::MemoryPropertyFlagBits::eDeviceLocal);
     mDepthImageView = createImageView(mDepthImage, depthFormat, vk::ImageAspectFlagBits::eDepth, 1);
     transitionImageLayout(mDepthImage, depthFormat, vk::ImageLayout::eUndefined, vk::ImageLayout::eDepthStencilAttachmentOptimal, 1);
 }
@@ -1647,7 +1665,7 @@ bool TriangleTest::hasStencilComponent(vk::Format format) {
 void TriangleTest::cleanDepthResources() {
     mDevice.destroy(mDepthImage);
     mDevice.destroy(mDepthImageView);
-    mDevice.freeMemory(mDepthImageMemory);
+    mDevice.freeMemory(mDepthDeviceMemory);
 }
 
 void TriangleTest::loadModel() {
@@ -1784,6 +1802,43 @@ void TriangleTest::generateMipmaps(vk::Image image, vk::Format imageFormat, int 
                                       {imageMemoryBarrier});
     }
     endSingleTimeCommands(commandBuffer);
+}
+
+vk::SampleCountFlagBits TriangleTest::getMaxUsableSampleCount() {
+    vk::PhysicalDeviceProperties properties = mPhysicalDevice.getProperties();
+    vk::PhysicalDeviceLimits &limits = properties.limits;
+
+    vk::SampleCountFlags counts = limits.framebufferColorSampleCounts & limits.framebufferDepthSampleCounts;
+    if (counts & vk::SampleCountFlagBits::e64) {
+        return vk::SampleCountFlagBits::e64;
+    } else if (counts & vk::SampleCountFlagBits::e32) {
+        return vk::SampleCountFlagBits::e32;
+    } else if (counts & vk::SampleCountFlagBits::e16) {
+        return vk::SampleCountFlagBits::e16;
+    } else if (counts & vk::SampleCountFlagBits::e8) {
+        return vk::SampleCountFlagBits::e8;
+    } else if (counts & vk::SampleCountFlagBits::e4) {
+        return vk::SampleCountFlagBits::e4;
+    } else if (counts & vk::SampleCountFlagBits::e2) {
+        return vk::SampleCountFlagBits::e2;
+    } else {
+        return vk::SampleCountFlagBits::e1;
+    }
+}
+
+void TriangleTest::createColorResources() {
+    vk::Format colorFormat = mSwapChainImageFormat.format;
+
+    std::tie(mColorImage, mColorDeviceMemory) = createImage(mSwapChainExtent.width, mSwapChainExtent.height, 1, mMsaaSamples, colorFormat,
+                                                            vk::ImageTiling::eOptimal, vk::ImageUsageFlagBits::eTransientAttachment | vk::ImageUsageFlagBits::eColorAttachment,
+                                                            vk::MemoryPropertyFlagBits::eDeviceLocal);
+    mColorImageView = createImageView(mColorImage, colorFormat, vk::ImageAspectFlagBits::eColor, 1);
+}
+
+void TriangleTest::cleanColorResources() {
+    mDevice.destroy(mColorImage);
+    mDevice.destroy(mColorImageView);
+    mDevice.freeMemory(mColorDeviceMemory);
 }
 
 
