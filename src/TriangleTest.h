@@ -215,6 +215,7 @@ private:
 
     std::vector<vk::DescriptorSet> mDescriptorSets;
 
+    uint32_t mMipLevels;
     vk::Image mTextureImage;
     vk::DeviceMemory mTextureImageMemory;
 
@@ -332,20 +333,20 @@ private:
 
     void createTextureImage();
 
-    std::pair<vk::Image, vk::DeviceMemory> createImage(uint32_t width, uint32_t height, vk::Format format, vk::ImageTiling imageTiling,
+    std::pair<vk::Image, vk::DeviceMemory> createImage(uint32_t width, uint32_t height, uint32_t mipLevels, vk::Format format, vk::ImageTiling imageTiling,
                                                        vk::ImageUsageFlags imageUsage, vk::MemoryPropertyFlags memoryProperty);
 
     vk::CommandBuffer beginSingleTimeCommands();
 
     void endSingleTimeCommands(vk::CommandBuffer &commandBuffer);
 
-    void transitionImageLayout(vk::Image image, vk::Format format, vk::ImageLayout oldImageLayout, vk::ImageLayout newImageLayout);
+    void transitionImageLayout(vk::Image image, vk::Format format, vk::ImageLayout oldImageLayout, vk::ImageLayout newImageLayout, uint32_t mipLevels);
 
     void copyBufferToImage(vk::Buffer buffer, vk::Image image, uint32_t width, uint32_t height);
 
     void createTextureImageView();
 
-    vk::ImageView createImageView(const vk::Image &image, const vk::Format format, vk::ImageAspectFlags imageAspect);
+    vk::ImageView createImageView(const vk::Image &image, vk::Format format, vk::ImageAspectFlags imageAspect, uint32_t mipLevels);
 
     void createTextureSampler();
 
@@ -360,6 +361,8 @@ private:
     void cleanDepthResources();
 
     void loadModel();
+
+    void generateMipmaps(vk::Image image, vk::Format imageFormat, int textureWidth, int textureHeight, uint32_t mipLevels);
 };
 
 
