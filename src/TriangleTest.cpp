@@ -1751,6 +1751,17 @@ void TriangleTest::generateMipmaps(vk::Image image, vk::Format imageFormat, int 
 
             commandBuffer.blitImage(image, vk::ImageLayout::eTransferSrcOptimal, image, vk::ImageLayout::eTransferDstOptimal, {imageBlit}, vk::Filter::eLinear);
 
+            imageMemoryBarrier.setOldLayout(vk::ImageLayout::eTransferSrcOptimal)
+                    .setNewLayout(vk::ImageLayout::eShaderReadOnlyOptimal)
+                    .setSrcAccessMask(vk::AccessFlagBits::eTransferWrite)
+                    .setDstAccessMask(vk::AccessFlagBits::eShaderRead);
+
+            commandBuffer.pipelineBarrier(vk::PipelineStageFlagBits::eTransfer, vk::PipelineStageFlagBits::eFragmentShader,
+                                          static_cast<vk::DependencyFlags>(0),
+                                          {},
+                                          {},
+                                          {imageMemoryBarrier});
+
             if (mipWidth > 1) {
                 mipWidth /= 2;
             }
