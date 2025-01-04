@@ -18,3 +18,22 @@ std::vector<char> FileUtil::readFile(const std::string &path) {
     fileStream.close();
     return buffer;
 }
+
+
+std::vector<uint32_t> FileUtil::convertToUint32Vector(const std::vector<char> &charVector) {
+    // 确保输入数据按 4 字节对齐
+    if (charVector.size() % sizeof(uint32_t) != 0) {
+        throw std::runtime_error("Input vector size is not aligned to 4 bytes");
+    }
+
+    // 计算转换后的元素个数
+    size_t numElements = charVector.size() / sizeof(uint32_t);
+
+    // 创建目标 vector 并分配空间
+    std::vector<uint32_t> uint32Vector(numElements);
+
+    // 复制数据
+    std::memcpy(uint32Vector.data(), charVector.data(), charVector.size());
+
+    return uint32Vector;
+}

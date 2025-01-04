@@ -8,6 +8,7 @@
 #include <limits>
 #include <algorithm>
 
+
 #include <chrono>
 
 // That way GLFW will include its own definitions and automatically load the Vulkan header with it.
@@ -18,30 +19,20 @@
 #include "vulkan/vulkan.hpp"
 #include "QueueFamilyIndices.h"
 #include "SwapChainSupportDetail.h"
-#include "ShaderData.h"
+#include "TestData.h"
 
-#include "VulkanInstance.h"
-#include "VulkanSurface.h"
-#include "VulkanDevice.h"
-#include "VulkanSwapchain.h"
-#include "VulkanFrameBuffer.h"
-#include "VulkanRenderPass.h"
-#include "VulkanDescriptorSet.h"
-#include "VulkanPipeline.h"
-#include "VulkanCommandPool.h"
-#include "VulkanFrameBuffer.h"
-#include "VulkanVertexBuffer.h"
-
-namespace triangle {
-    class TriangleTest {
+namespace model_loader_test {
+    class ModelLoaderTest {
     public:
         // public fields
     private:
         // private fields
-        const int32_t mWidth = 1024;
+        const int32_t mWidth = (int32_t) (1024 * 1.118);
         const int32_t mHeight = 1024;
         const std::array<float, 4> mClearColor = {0.05f, 0.05f, 0.05f, 1.0f};
 
+        const char *MODEL_PATH = "../model/viking_room/viking_room.obj";
+        const char *TEXTURE_PATH = "../model/viking_room/viking_room.png";
 
         // 同时处理的帧数
         const int MAX_FRAMES_IN_FLIGHT = 2;
@@ -62,18 +53,49 @@ namespace triangle {
 
         GLFWwindow *mWindow;
 
-        std::unique_ptr<engine::VulkanInstance> mVulkanInstance;
-        std::unique_ptr<engine::VulkanSurface> mVulkanSurface;
-        std::unique_ptr<engine::VulkanDevice> mVulkanDevice;
-        std::unique_ptr<engine::VulkanSwapchain> mVulkanSwapchain;
-        std::unique_ptr<engine::VulkanRenderPass> mVulkanRenderPass;
-        std::unique_ptr<engine::VulkanDescriptorSet> mVulkanDescriptorSet;
-        std::unique_ptr<engine::VulkanPipeline> mVulkanPipeline;
-        std::unique_ptr<engine::VulkanCommandPool> mVulkanCommandPool;
-        std::unique_ptr<engine::VulkanFrameBuffer> mVulkanFrameBuffer;
-        std::unique_ptr<engine::VulkanVertexBuffer> mVulkanVertexBuffer;
+        vk::Instance mInstance;
 
         vk::DebugUtilsMessengerEXT mDebugMessenger;
+
+        // 物理设备
+        vk::PhysicalDevice mPhysicalDevice;
+
+        // 逻辑设备
+        vk::Device mDevice;
+
+        // 图形相关的任务队列
+        vk::Queue mGraphicsQueue;
+
+        // 显示相关的任务队列
+        vk::Queue mPresentQueue;
+
+        vk::SurfaceKHR mSurface;
+
+        vk::SwapchainKHR mSwapChain;
+
+        vk::SurfaceFormatKHR mSwapChainImageFormat;
+
+        vk::Extent2D mSwapChainExtent;
+
+        std::vector<vk::Image> mSwapChainImages;
+
+        std::vector<vk::ImageView> mSwapChainImageViews;
+
+        vk::RenderPass mRenderPass;
+
+        vk::DescriptorSetLayout mDescriptorSetLayout;
+
+        vk::PipelineLayout mPipelineLayout;
+
+        vk::Pipeline mGraphicsPipeline;
+
+        std::vector<vk::Framebuffer> mSwapChainFrameBuffers;
+
+        vk::CommandPool mCommandPool;
+
+
+        // todo mCommandBuffers mImageAvailableSemaphores mRenderFinishedSemaphores mInFlightFences 组织成对象数组
+        std::vector<vk::CommandBuffer> mCommandBuffers;
 
         std::vector<vk::Semaphore> mImageAvailableSemaphores;
 
@@ -85,7 +107,7 @@ namespace triangle {
 
         bool mFrameBufferResized = false;
 
-        std::vector<app::Vertex> mVertices;
+        std::vector<Vertex> mVertices;
 
         std::vector<uint32_t> mIndices;
 
@@ -97,18 +119,36 @@ namespace triangle {
 
         vk::DeviceMemory mIndexBufferMemory;
 
+        std::vector<vk::Buffer> mUniformBuffers;
+        std::vector<vk::DeviceMemory> mUniformBufferMemories;
+        std::vector<void *> mUniformBuffersMapped;
+
+        vk::DescriptorPool mDescriptorPool;
+
+        std::vector<vk::DescriptorSet> mDescriptorSets;
+
+        uint32_t mMipLevels;
+        vk::Image mTextureImage;
+        vk::DeviceMemory mTextureImageMemory;
+
+        vk::ImageView mTextureImageView;
+
+        vk::Sampler mTextureSampler;
+
         vk::Image mDepthImage;
         vk::DeviceMemory mDepthDeviceMemory;
         vk::ImageView mDepthImageView;
+
+        vk::SampleCountFlagBits mMsaaSamples = vk::SampleCountFlagBits::e1;
 
         vk::Image mColorImage;
         vk::DeviceMemory mColorDeviceMemory;
         vk::ImageView mColorImageView;
 
     public:
-        TriangleTest();
+        ModelLoaderTest();
 
-        ~TriangleTest();
+        ~ModelLoaderTest();
 
         void main();
 
@@ -124,11 +164,19 @@ namespace triangle {
 
         void createInstance();
 
+        bool checkValidationLayerSupported();
+
         std::vector<const char *> getRequiredExtensions();
 
         void setupDebugMessenger();
 
         void destroyDebugUtilsMessengerExt(const vk::AllocationCallbacks *pAllocator);
+
+        void pickPhysicalDevice();
+
+        bool isDeviceSuitable(vk::PhysicalDevice device);
+
+        int rateDeviceSuitability(vk::PhysicalDevice device);
 
         void createLogicalDevice();
 
@@ -136,9 +184,25 @@ namespace triangle {
 
         void createSurface();
 
+        bool isDeviceSupportedRequiredExtensions(vk::PhysicalDevice device);
+
+        SwapChainSupportDetail querySwapChainSupported(vk::PhysicalDevice &device);
+
+        vk::SurfaceFormatKHR chooseSwapSurfaceFormat(const std::vector<vk::SurfaceFormatKHR> &availableFormats);
+
+        vk::PresentModeKHR choosePresentMode(const std::vector<vk::PresentModeKHR> &availablePresentModes);
+
+        vk::Extent2D chooseSwapExtent(const vk::SurfaceCapabilitiesKHR &capability);
+
         void createSwapChain();
 
+        void createImageViews();
+
+        void cleanImageViews();
+
         void createGraphicsPipeline();
+
+        vk::ShaderModule createShaderModule(const std::vector<char> &code);
 
         void createRenderPass();
 
@@ -148,11 +212,15 @@ namespace triangle {
 
         void createCommandPool();
 
+        void createCommandBuffers();
+
         void recordCommandBuffer(const vk::CommandBuffer &commandBuffer, uint32_t imageIndex);
 
         void drawFrame();
 
         void createSyncObjects();
+
+        void cleanSyncObjects();
 
         void recreateSwapChain();
 
@@ -168,7 +236,20 @@ namespace triangle {
 
         void copyBuffer(vk::Buffer srcBuffer, vk::Buffer dstBuffer, vk::DeviceSize size);
 
+
         void createDescriptorSetLayout();
+
+        void createUniformBuffers();
+
+        void cleanUniformBuffers();
+
+        void updateUniformBuffer(uint32_t frameIndex);
+
+        void createDescriptorPool();
+
+        void createDescriptorSets();
+
+        void createTextureImage();
 
         std::pair<vk::Image, vk::DeviceMemory> createImage(uint32_t width, uint32_t height, uint32_t mipLevels, vk::SampleCountFlagBits numSamples,
                                                            vk::Format format, vk::ImageTiling imageTiling,
@@ -180,7 +261,13 @@ namespace triangle {
 
         void transitionImageLayout(vk::Image image, vk::Format format, vk::ImageLayout oldImageLayout, vk::ImageLayout newImageLayout, uint32_t mipLevels);
 
+        void copyBufferToImage(vk::Buffer buffer, vk::Image image, uint32_t width, uint32_t height);
+
+        void createTextureImageView();
+
         vk::ImageView createImageView(const vk::Image &image, vk::Format format, vk::ImageAspectFlags imageAspect, uint32_t mipLevels);
+
+        void createTextureSampler();
 
         void createDepthResources();
 
@@ -193,6 +280,8 @@ namespace triangle {
         void cleanDepthResources();
 
         void loadModel();
+
+        void generateMipmaps(vk::Image image, vk::Format imageFormat, int textureWidth, int textureHeight, uint32_t mipLevels);
 
         vk::SampleCountFlagBits getMaxUsableSampleCount();
 
