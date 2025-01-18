@@ -24,27 +24,20 @@ inline std::string currentDateTime() {
 }
 
 // Windows 日志宏定义
-#define LOGV(...) (printf("[VERBOSE] [%s] [%s] ", currentDateTime().c_str(), TAG), printf(__VA_ARGS__), printf("\n"))
-#define LOGD(...) (printf("[DEBUG]   [%s] [%s] ", currentDateTime().c_str(), TAG), printf(__VA_ARGS__), printf("\n"))
-#define LOGI(...) (printf("[INFO]    [%s] [%s] ", currentDateTime().c_str(), TAG), printf(__VA_ARGS__), printf("\n"))
-#define LOGW(...) (printf("[WARN]    [%s] [%s] ", currentDateTime().c_str(), TAG), printf(__VA_ARGS__), printf("\n"))
-#define LOGE(...) (printf("[ERROR]   [%s] [%s] ", currentDateTime().c_str(), TAG), printf(__VA_ARGS__), printf("\n"))
+#define LOG_V(...) (printf("[VERBOSE] [%s] [%s] ", currentDateTime().c_str(), TAG), printf(__VA_ARGS__), printf("\n"))
+#define LOG_D(...) (printf("[DEBUG]   [%s] [%s] ", currentDateTime().c_str(), TAG), printf(__VA_ARGS__), printf("\n"))
+#define LOG_I(...) (printf("[INFO]    [%s] [%s] ", currentDateTime().c_str(), TAG), printf(__VA_ARGS__), printf("\n"))
+#define LOG_W(...) (printf("[WARN]    [%s] [%s] ", currentDateTime().c_str(), TAG), printf(__VA_ARGS__), printf("\n"))
+#define LOG_E(...) (printf("[ERROR]   [%s] [%s] ", currentDateTime().c_str(), TAG), printf(__VA_ARGS__), printf("\n"))
 
 #endif
 
 
 #ifdef __ANDROID__
 #include <android/log.h>
-#define LOGV(...) ((void)__android_log_print(ANDROID_LOG_VERBOSE, TAG, __VA_ARGS__))
-#define LOGD(...) ((void)__android_log_print(ANDROID_LOG_DEBUG, TAG, __VA_ARGS__))
-#define LOGI(...) ((void)__android_log_print(ANDROID_LOG_INFO, TAG, __VA_ARGS__))
-#define LOGW(...) ((void)__android_log_print(ANDROID_LOG_WARN, TAG, __VA_ARGS__))
-#define LOGE(...) ((void)__android_log_print(ANDROID_LOG_ERROR, TAG, __VA_ARGS__))
+#define LOG_V(...) ((void)__android_log_print(ANDROID_LOG_VERBOSE, TAG, __VA_ARGS__))
+#define LOG_D(...) ((void)__android_log_print(ANDROID_LOG_DEBUG, TAG, __VA_ARGS__))
+#define LOG_I(...) ((void)__android_log_print(ANDROID_LOG_INFO, TAG, __VA_ARGS__))
+#define LOG_W(...) ((void)__android_log_print(ANDROID_LOG_WARN, TAG, __VA_ARGS__))
+#define LOG_E(...) ((void)__android_log_print(ANDROID_LOG_ERROR, TAG, __VA_ARGS__))
 #endif
-
-
-#define LOG_V(...) LOGV(__VA_ARGS__)
-#define LOG_D(...) LOGD(__VA_ARGS__)
-#define LOG_I(...) LOGI(__VA_ARGS__)
-#define LOG_W(...) LOGW(__VA_ARGS__)
-#define LOG_E(...) LOGE(__VA_ARGS__)

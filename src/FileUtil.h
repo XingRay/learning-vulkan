@@ -12,5 +12,5 @@ class FileUtil {
 public:
     static std::vector<char> readFile(const std::string &path);
 
-    static std::vector<uint32_t> convertToUint32Vector(const std::vector<char>& charVector);
+    // static std::vector<uint32_t> convertToUint32Vector(const std::vector<char>& charVector);
 };
